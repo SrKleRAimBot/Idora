@@ -1,0 +1,36 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+
+    <!--
+      Transitive pinning is deliberately left off. The library declares the lowest dependency
+      version it supports (8.0.x), while the test and benchmark projects pull newer packages that
+      depend on 10.x. Pinning would force the two together and fail the restore; leaving it off lets
+      NuGet unify upwards exactly as it does in a consuming application.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup Label="Library dependencies">
+    <!--
+      Deliberately pinned to the lowest supported version (8.0.x) rather than the newest.
+      A library that references 10.x forces every consumer onto 10.x; referencing 8.0.x lets
+      NuGet unify upwards for consumers who already use a newer version, and leaves .NET 8
+      consumers alone.
+    -->
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+  </ItemGroup>
+
+  <ItemGroup Label="Test dependencies">
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageVersion Include="Shouldly" Version="4.3.0" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+  </ItemGroup>
+
+  <ItemGroup Label="Benchmark dependencies">
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+  </ItemGroup>
+
+</Project>

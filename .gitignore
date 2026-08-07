@@ -1,0 +1,28 @@
+## .NET build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+*.user
+*.suo
+
+## Test and benchmark output
+TestResults/
+BenchmarkDotNet.Artifacts/
+*.trx
+*.coverage
+coverage*.json
+coverage*.xml
+*.opencover.xml
+
+## Packages
+*.nupkg
+*.snupkg
+
+## IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.DS_Store
