@@ -21,6 +21,19 @@
     <PackageTags>id;identifier;ulid;uuid;uuidv7;guid;prefix;prefixed-id;sortable;time-ordered;dependency-injection</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReleaseNotes>
+      1.0.0 - Initial release.
+
+      * Identifiers of the form &lt;prefix&gt;_&lt;value&gt;, for example usr_01k2f9v8ta7m3x0qbrn4dzeh5c.
+      * Entity prefixes registered once at DI setup; duplicates and malformed prefixes fail at start-up.
+      * ULID values by default (26 characters), or UUIDv7 (32 characters) via UseUuidV7().
+      * Time-ordered: identifiers sort by creation time as plain strings. ULIDs are strictly
+        monotonic per thread, including within a millisecond and across backwards clock steps.
+      * One allocation per identifier. Roughly 30ns for ULID and 46ns for UUIDv7, against 226ns
+        for Guid.NewGuid().ToString().
+      * Targets net8.0, net9.0 and net10.0. Trimming and AOT compatible.
+    </PackageReleaseNotes>
     <PackageProjectUrl>https://github.com/SrKleRAimBot/UserFriendlyIds</PackageProjectUrl>
     <RepositoryUrl>https://github.com/SrKleRAimBot/UserFriendlyIds</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -35,6 +48,7 @@
 
   <ItemGroup>
     <None Include="../../README.md" Pack="true" PackagePath="\" />
+    <None Include="icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>

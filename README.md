@@ -392,6 +392,29 @@ dotnet run   -c Release --project tests/UserFriendlyIds.Benchmarks
 Tests are written Arrange-Act-Assert and cover the success, failure and edge cases of every public
 member, plus the encoders, the monotonic counter and the allocation behaviour directly.
 
+## Releasing
+
+Releases are driven by tags. Pushing a `v*` tag builds all three target frameworks, runs the full
+suite, packs, verifies the package contents, publishes to nuget.org and opens a GitHub release:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The published version comes from the tag, not from the `csproj`, so the two can never disagree. A
+tag that is not a valid semantic version fails the workflow before anything is published — which
+matters, because **a version published to nuget.org can never be replaced**, only unlisted.
+
+To rehearse a release without publishing anything, run the workflow manually from the Actions tab.
+A manual run builds, tests, packs and verifies exactly as a tag push does, and attaches the
+resulting package to the run as an artifact, but the publishing steps are gated on a tag push and
+are skipped. Publishing is deliberately unreachable from a branch or a hand-typed version.
+
+Publishing uses [Trusted Publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing):
+the workflow exchanges a short-lived GitHub OIDC token for a one-hour nuget.org API key, so there is
+no long-lived secret to store or rotate.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
