@@ -6,11 +6,20 @@ name: Release
 on:
   push:
     tags: ['v*']
+
+  # Dry run only. This builds, tests, packs, verifies and uploads the package as a build
+  # artifact, but deliberately stops short of publishing: the login, push and release steps
+  # are gated on a tag push below.
+  #
+  # Publishing is irreversible, so it must not be reachable from an arbitrary branch with a
+  # hand-typed version. Restricting it to a tag is what makes "the tag and the published
+  # version can never disagree" actually true rather than merely conventional.
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish, without the leading v (e.g. 1.0.0)'
-        required: true
+        description: 'Version to pack for the dry run. Nothing is published.'
+        required: false
+        default: '0.0.0-dryrun'
         type: string
 
 jobs:
@@ -60,7 +69,12 @@ jobs:
           fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Publishing version $VERSION"
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "Publishing version $VERSION from tag $GITHUB_REF_NAME"
+          else
+            echo "Dry run for version $VERSION. Nothing will be published."
+          fi
 
       - name: Build
         run: dotnet build -c Release -p:Version=${{ steps.version.outputs.version }}
@@ -78,27 +92,38 @@ jobs:
             -o artifacts
 
       - name: Verify package contents
-        # Cheap insurance against shipping a package missing its README, icon or a target
-        # framework. Far easier to catch here than after an irreversible push.
+        # Cheap insurance against shipping a package missing its README, icon, or the assembly
+        # or XML documentation for any target framework. Far easier to catch here than after an
+        # irreversible push.
         run: |
-          PKG="artifacts/UserFriendlyIds.${{ steps.version.outputs.version }}.nupkg"
+          VERSION="${{ steps.version.outputs.version }}"
+          PKG="artifacts/UserFriendlyIds.$VERSION.nupkg"
           test -f "$PKG" || { echo "::error::$PKG was not produced"; exit 1; }
-          test -f "artifacts/UserFriendlyIds.${{ steps.version.outputs.version }}.snupkg" \
+          test -f "artifacts/UserFriendlyIds.$VERSION.snupkg" \
             || { echo "::error::symbols package was not produced"; exit 1; }
+
+          # The expected lib/ layout is derived from the csproj rather than hard-coded, so that
+          # adding or removing a target framework cannot leave this check quietly validating a
+          # subset of what actually ships.
+          TFMS=$(sed -n 's/.*<TargetFrameworks>\(.*\)<\/TargetFrameworks>.*/\1/p' \
+            src/UserFriendlyIds/UserFriendlyIds.csproj | tr ';' ' ')
+          test -n "$TFMS" || { echo "::error::could not read TargetFrameworks from the csproj"; exit 1; }
+          echo "Target frameworks: $TFMS"
+
+          REQUIRED="README.md icon.png"
+          for tfm in $TFMS; do
+            REQUIRED="$REQUIRED lib/$tfm/UserFriendlyIds.dll lib/$tfm/UserFriendlyIds.xml"
+          done
 
           CONTENTS=$(unzip -Z1 "$PKG")
           echo "$CONTENTS"
-          for required in \
-            "README.md" \
-            "icon.png" \
-            "lib/net8.0/UserFriendlyIds.dll" \
-            "lib/net9.0/UserFriendlyIds.dll" \
-            "lib/net10.0/UserFriendlyIds.dll" \
-            "lib/net8.0/UserFriendlyIds.xml"
-          do
+
+          for required in $REQUIRED; do
             echo "$CONTENTS" | grep -qx "$required" \
               || { echo "::error::package is missing $required"; exit 1; }
           done
+
+          echo "Verified present: $REQUIRED"
 
       - name: Upload package as a build artifact
         # Kept regardless of whether the push succeeds, so a failed publish can be diagnosed.
@@ -108,6 +133,8 @@ jobs:
           path: artifacts/*
 
       - name: Log in to NuGet (OIDC, short-lived key)
+        # Tag pushes only. A manually dispatched run stops at the artifact above.
+        if: github.event_name == 'push'
         # Requested immediately before the push: these keys are valid for one hour, and each
         # OIDC token can be exchanged exactly once.
         uses: NuGet/login@v1
@@ -116,6 +143,8 @@ jobs:
           user: SrKleRAimBot
 
       - name: Push to nuget.org
+        # The irreversible step. Reachable only from a v* tag push.
+        if: github.event_name == 'push'
         run: |
           dotnet nuget push "artifacts/*.nupkg" \
             --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
@@ -123,9 +152,22 @@ jobs:
             --skip-duplicate
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        # Tag pushes only, like the NuGet push above.
         if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
         with:
           name: v${{ steps.version.outputs.version }}
           generate_release_notes: true
           files: artifacts/*
+
+      - name: Dry run summary
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          {
+            echo "### Dry run complete"
+            echo
+            echo "Version \`${{ steps.version.outputs.version }}\` was built, tested, packed and verified."
+            echo "**Nothing was published.** The package is attached to this run as an artifact."
+            echo
+            echo "To publish for real, push a tag: \`git tag v1.0.0 && git push origin v1.0.0\`"
+          } >> "$GITHUB_STEP_SUMMARY"

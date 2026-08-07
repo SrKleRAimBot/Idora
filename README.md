@@ -406,6 +406,11 @@ The published version comes from the tag, not from the `csproj`, so the two can 
 tag that is not a valid semantic version fails the workflow before anything is published — which
 matters, because **a version published to nuget.org can never be replaced**, only unlisted.
 
+To rehearse a release without publishing anything, run the workflow manually from the Actions tab.
+A manual run builds, tests, packs and verifies exactly as a tag push does, and attaches the
+resulting package to the run as an artifact, but the publishing steps are gated on a tag push and
+are skipped. Publishing is deliberately unreachable from a branch or a hand-typed version.
+
 Publishing uses [Trusted Publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing):
 the workflow exchanges a short-lived GitHub OIDC token for a one-hour nuget.org API key, so there is
 no long-lived secret to store or rotate.
