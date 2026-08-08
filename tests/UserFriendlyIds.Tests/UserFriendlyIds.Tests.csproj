@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/UserFriendlyIds/UserFriendlyIds.csproj" />
+    <ProjectReference Include="../UserFriendlyIds.Tests.Fixtures/UserFriendlyIds.Tests.Fixtures.csproj" />
   </ItemGroup>
 
 </Project>

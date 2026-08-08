@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Attributed entity types living in an assembly of their own. Scanning is per-assembly, so any
+    attributed type placed in UserFriendlyIds.Tests would be swept up by every assembly-scanning
+    test — including the ones that deliberately declare colliding or malformed prefixes. Keeping the
+    well-formed set here lets those tests assert on an exact set of registrations.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/UserFriendlyIds/UserFriendlyIds.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- So the tests can name the internal fixture entity when asserting it was discovered. -->
+    <InternalsVisibleTo Include="UserFriendlyIds.Tests" />
+  </ItemGroup>
+
+</Project>

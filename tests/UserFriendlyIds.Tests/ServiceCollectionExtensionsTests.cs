@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
+using UserFriendlyIds.Tests.Fixtures;
 using UserFriendlyIds.Tests.Support;
 using Xunit;
 
@@ -247,6 +248,60 @@ public sealed class ServiceCollectionExtensionsTests
 
         // Assert
         provider.GetRequiredService<IUserFriendlyIdGenerator>().Generate<User>().ShouldStartWith("first_");
+    }
+
+    [Fact]
+    public void AddUserFriendlyIds_WithAttributedEntities_MakesThemResolvable()
+    {
+        // Arrange
+        ServiceCollection services = new();
+        services.AddUserFriendlyIds(options => options.RegisterEntitiesFromAssemblyContaining<FixtureUser>());
+
+        // Act
+        using ServiceProvider provider = services.BuildServiceProvider();
+        IUserFriendlyIdGenerator generator = provider.GetRequiredService<IUserFriendlyIdGenerator>();
+
+        // Assert
+        generator.Generate<FixtureUser>().ShouldStartWith("fxusr_");
+    }
+
+    [Fact]
+    public void AddUserFriendlyIds_MixingAttributedAndFluentEntities_RegistersBoth()
+    {
+        // Arrange
+        ServiceCollection services = new();
+        services.AddUserFriendlyIds(options =>
+        {
+            options.RegisterEntitiesFromAssemblyContaining<FixtureUser>();
+            options.RegisterEntity<User>("usr");
+        });
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        // Act
+        IUserFriendlyIdGenerator generator = provider.GetRequiredService<IUserFriendlyIdGenerator>();
+
+        // Assert
+        generator.Generate<FixtureUser>().ShouldStartWith("fxusr_");
+        generator.Generate<User>().ShouldStartWith("usr_");
+    }
+
+    [Fact]
+    public void AddUserFriendlyIds_WhenAnAttributeClashesWithAFluentPrefix_ThrowsWhileRegistering()
+    {
+        // Arrange
+        ServiceCollection services = new();
+
+        // Act
+        DuplicateEntityPrefixException exception = Should.Throw<DuplicateEntityPrefixException>(() =>
+            services.AddUserFriendlyIds(options =>
+            {
+                options.RegisterEntity<User>("fxusr");
+                options.RegisterEntitiesFromAssemblyContaining<FixtureUser>();
+            }));
+
+        // Assert: the same start-up guarantee applies whichever style declared the prefix.
+        exception.Prefix.ShouldBe("fxusr");
+        services.ShouldBeEmpty();
     }
 
     [Fact]

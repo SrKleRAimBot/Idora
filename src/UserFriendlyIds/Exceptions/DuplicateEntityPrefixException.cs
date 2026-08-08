@@ -19,9 +19,11 @@ namespace UserFriendlyIds;
 /// stores compare strings case-insensitively anyway.
 /// </para>
 /// <para>
-/// This is thrown from <see cref="UserFriendlyIdOptions.RegisterEntity{TEntity}(string)"/> at
-/// application start-up, not at the point an identifier is generated, so a misconfiguration fails
-/// the process immediately rather than in production traffic.
+/// This is thrown during configuration at application start-up, not at the point an identifier is
+/// generated, so a misconfiguration fails the process immediately rather than in production traffic.
+/// It does not matter where the two registrations came from: two
+/// <see cref="UserFriendlyIdOptions.RegisterEntity{TEntity}(string)"/> calls, two
+/// <see cref="EntityPrefixAttribute"/> declarations, or one of each all clash the same way.
 /// </para>
 /// </remarks>
 public sealed class DuplicateEntityPrefixException : UserFriendlyIdsException
@@ -95,6 +97,12 @@ public sealed class DuplicateEntityPrefixException : UserFriendlyIdsException
             conflictingEntityType);
 
     /// <summary>Builds the exception for one type being registered more than once.</summary>
+    /// <remarks>
+    /// A registration can arrive from a <c>RegisterEntity</c> call, an
+    /// <see cref="EntityPrefixAttribute"/>, or an assembly scan that covers the type &#8212; and
+    /// scanning one assembly twice is as much a repeat as any other. The advice below therefore names
+    /// all three rather than guessing which one the caller used.
+    /// </remarks>
     internal static DuplicateEntityPrefixException ForEntityType(
         Type entityType,
         string existingPrefix,
@@ -102,9 +110,18 @@ public sealed class DuplicateEntityPrefixException : UserFriendlyIdsException
         new(
             string.Format(
                 CultureInfo.InvariantCulture,
-                "The entity type '{0}' is already registered with the prefix '{1}' and cannot also be "
-                + "registered with '{2}'. Each entity type may have only one prefix; remove the duplicate "
-                + "RegisterEntity call.",
+                // Both registrations agreeing on the prefix says the mapping was declared twice rather
+                // than declared differently, which is a different mistake and a different fix. Saying
+                // "cannot also be registered with 'usr'" when it is already 'usr' just reads as a bug.
+                string.Equals(existingPrefix, attemptedPrefix, StringComparison.Ordinal)
+                    ? "The entity type '{0}' is already registered with the prefix '{1}', and cannot be "
+                      + "registered a second time. Each entity type may be registered exactly once. Look "
+                      + "for a repeated RegisterEntity call, a type carrying an [EntityPrefix] attribute "
+                      + "that is also registered by hand, or the same assembly being scanned twice."
+                    : "The entity type '{0}' is already registered with the prefix '{1}' and cannot also "
+                      + "be registered with '{2}'. Each entity type may have only one prefix. Remove "
+                      + "whichever registration is wrong: a RegisterEntity call, an [EntityPrefix] "
+                      + "attribute, or an assembly scan that covers the type.",
                 entityType,
                 existingPrefix,
                 attemptedPrefix),
