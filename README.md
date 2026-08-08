@@ -321,7 +321,7 @@ not care which went wrong.
 | Exception | Thrown when | Thrown at | Fix |
 | --- | --- | --- | --- |
 | `InvalidEntityPrefixException` | A prefix is empty, longer than 16 characters, or contains something other than an ASCII letter or digit | Start-up, or on the `Generate(string)` call | Use 1–16 letters and digits, no underscore |
-| `DuplicateEntityPrefixException` | The same prefix is registered for two entity types, or one entity type is registered twice — by either registration style, or one of each | Start-up | Give each entity type its own prefix, and register it once |
+| `DuplicateEntityPrefixException` | The same prefix is registered for two entity types, or one entity type is registered twice — whether by two `RegisterEntity` calls, one of each style, or the same assembly being scanned twice | Start-up | Give each entity type its own prefix, and register it exactly once |
 | `EntityPrefixNotRegisteredException` | `Generate<TEntity>()` is called for a type with no registered prefix | On the call | Register the type, or use `Generate(string)` |
 
 The first two are start-up failures by design. A duplicate prefix defeats the whole point — you

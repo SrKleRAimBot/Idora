@@ -276,10 +276,30 @@ public sealed class AttributeRegistrationTests
         options.RegisterEntitiesFromAssembly(FixtureAssembly);
 
         // Act
-        Action act = () => options.RegisterEntitiesFromAssembly(FixtureAssembly);
+        DuplicateEntityPrefixException exception = Should.Throw<DuplicateEntityPrefixException>(
+            () => options.RegisterEntitiesFromAssembly(FixtureAssembly));
 
-        // Assert
-        act.ShouldThrow<DuplicateEntityPrefixException>();
+        // Assert: scanning twice is a repeat like any other, and the advice has to say so — neither
+        // "remove the RegisterEntity call" nor "remove the attribute" is the fix here.
+        exception.Message.ShouldContain("scanned twice");
+        exception.Message.ShouldNotContain("cannot also be registered with");
+    }
+
+    [Fact]
+    public void RegisterEntity_ForAnAttributedTypeWithADifferentPrefix_SaysWhichPrefixesDisagree()
+    {
+        // Arrange
+        UserFriendlyIdOptions options = new();
+        options.RegisterEntitiesFromAssembly(FixtureAssembly);
+
+        // Act
+        DuplicateEntityPrefixException exception = Should.Throw<DuplicateEntityPrefixException>(
+            () => options.RegisterEntity<FixtureUser>("other"));
+
+        // Assert: declaring two different prefixes is a different mistake from declaring one twice.
+        exception.Message.ShouldContain("fxusr");
+        exception.Message.ShouldContain("other");
+        exception.Message.ShouldContain("only one prefix");
     }
 
     [Fact]
