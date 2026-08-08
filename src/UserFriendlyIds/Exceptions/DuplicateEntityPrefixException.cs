@@ -19,9 +19,11 @@ namespace UserFriendlyIds;
 /// stores compare strings case-insensitively anyway.
 /// </para>
 /// <para>
-/// This is thrown from <see cref="UserFriendlyIdOptions.RegisterEntity{TEntity}(string)"/> at
-/// application start-up, not at the point an identifier is generated, so a misconfiguration fails
-/// the process immediately rather than in production traffic.
+/// This is thrown during configuration at application start-up, not at the point an identifier is
+/// generated, so a misconfiguration fails the process immediately rather than in production traffic.
+/// It does not matter where the two registrations came from: two
+/// <see cref="UserFriendlyIdOptions.RegisterEntity{TEntity}(string)"/> calls, two
+/// <see cref="EntityPrefixAttribute"/> declarations, or one of each all clash the same way.
 /// </para>
 /// </remarks>
 public sealed class DuplicateEntityPrefixException : UserFriendlyIdsException
@@ -103,8 +105,8 @@ public sealed class DuplicateEntityPrefixException : UserFriendlyIdsException
             string.Format(
                 CultureInfo.InvariantCulture,
                 "The entity type '{0}' is already registered with the prefix '{1}' and cannot also be "
-                + "registered with '{2}'. Each entity type may have only one prefix; remove the duplicate "
-                + "RegisterEntity call.",
+                + "registered with '{2}'. Each entity type may have only one prefix; remove either the "
+                + "duplicate RegisterEntity call or the [EntityPrefix] attribute.",
                 entityType,
                 existingPrefix,
                 attemptedPrefix),

@@ -62,6 +62,16 @@ builder.Services.AddUserFriendlyIds(options =>
 });
 ```
 
+Or declare the prefix on the entity and collect them in one line — see
+[With an attribute](#with-an-attribute):
+
+```csharp
+[EntityPrefix("usr")]
+public sealed class User { /* ... */ }
+
+builder.Services.AddUserFriendlyIds(options => options.RegisterEntitiesFromAssemblyContaining<User>());
+```
+
 Then inject `IUserFriendlyIdGenerator` wherever you create an entity:
 
 ```csharp
@@ -84,8 +94,19 @@ inject it anywhere and call it from anywhere.
 
 ### Registering entity prefixes
 
+There are two ways to say that a `User` gets `usr`. They do the same thing, they can be mixed in one
+application, and both are read once at start-up and never again.
+
+Whichever you use, a prefix must be **1 to 16 ASCII letters or digits**. The underscore is excluded
+because it separates the prefix from the value; allowing one inside a prefix would make an
+identifier impossible to split back apart unambiguously. Registration is validated as it happens, so
+a mistake stops the process at start-up rather than surfacing later as a wrong prefix in your
+database. See [Error handling](#error-handling).
+
+#### Fluently
+
 `RegisterEntity<TEntity>` maps a type to the prefix its identifiers will carry. The type is used
-purely as a key — it needs no base class, no interface and no attribute.
+purely as a key — it needs no base class and no interface.
 
 ```csharp
 services.AddUserFriendlyIds(options =>
@@ -95,15 +116,77 @@ services.AddUserFriendlyIds(options =>
 });
 ```
 
-A prefix must be **1 to 16 ASCII letters or digits**. The underscore is excluded because it
-separates the prefix from the value; allowing one inside a prefix would make an identifier
-impossible to split back apart unambiguously.
-
-Registration is validated as it happens, so a mistake stops the process at start-up rather than
-surfacing later as a wrong prefix in your database. See [Error handling](#error-handling).
-
 There is also a non-generic overload, `RegisterEntity(Type, string)`, for configuration driven by
 reflection.
+
+#### With an attribute
+
+Past a handful of entities, that list stops reading as a single source of truth and starts reading
+as a wall. `[EntityPrefix]` puts the prefix next to the type it describes:
+
+```csharp
+[EntityPrefix("usr")]
+public sealed class User
+{
+    public required string Id { get; init; }
+}
+```
+
+and you name the assemblies to collect them from:
+
+```csharp
+services.AddUserFriendlyIds(options => options.RegisterEntitiesFromAssemblyContaining<User>());
+```
+
+| Method | Scans |
+| --- | --- |
+| `RegisterEntitiesFromAssemblyContaining<TMarker>()` | The assembly that declares `TMarker`. Point it at one of your entities. |
+| `RegisterEntitiesFromAssembly(assembly)` | One assembly. |
+| `RegisterEntitiesFromAssemblies(a, b, …)` | Several, in the order given. |
+
+The scan happens once, during start-up, and what it finds goes into the same frozen lookup the
+fluent registrations do. **Nothing reflects over anything once the application is running**, so
+`Generate<T>()` costs exactly what it did before.
+
+`internal` and nested types are found — an entity does not have to be public to have a prefix. The
+attribute works on a class, a struct or an interface, and it is **not inherited**, so a subclass
+never quietly takes its base's prefix.
+
+#### Why you name the assemblies
+
+The obvious alternative is for the library to walk `AppDomain.CurrentDomain.GetAssemblies()` and
+find your entities for you. It is one line shorter and considerably worse:
+
+- **It sees only what is already loaded.** Assemblies load lazily, so an entity assembly nothing has
+  touched by the time `AddUserFriendlyIds` runs is skipped in silence. You do not find out at
+  start-up; you find out from an `EntityPrefixNotRegisteredException` on whichever request first
+  creates that kind of entity — which may well be in production, on a code path that happened to run
+  in a different order locally.
+- **It walks everything.** Every type in every transitive package and in the BCL, on every boot, for
+  a feature whose entire premise is that it costs nothing at run time.
+- **It is not your registry any more.** Any package that references this library could register a
+  prefix into your application, or collide with one of yours and stop it starting.
+
+Naming the assemblies turns all three into a problem you cannot have. It also keeps the reflective
+surface small enough to be honest about — see [Trimming and AOT](#trimming-and-aot).
+
+#### Mixing the two
+
+Both styles write into the same registry, so you can attribute the entities you own and register the
+rest fluently:
+
+```csharp
+services.AddUserFriendlyIds(options =>
+{
+    options.RegisterEntitiesFromAssemblyContaining<User>();  // your domain
+    options.RegisterEntity<ThirdPartyThing>("tpt");          // a type you cannot annotate
+});
+```
+
+The collision rules do not care where a registration came from. Two attributes claiming `usr`, an
+attribute and a `RegisterEntity` call claiming `usr`, or the same type declared both ways all fail
+at start-up with a `DuplicateEntityPrefixException` — the last one **even if both agree on the
+prefix**, because one type with two sources of truth is a mistake worth hearing about.
 
 ### Choosing the value format
 
@@ -238,13 +321,17 @@ not care which went wrong.
 | Exception | Thrown when | Thrown at | Fix |
 | --- | --- | --- | --- |
 | `InvalidEntityPrefixException` | A prefix is empty, longer than 16 characters, or contains something other than an ASCII letter or digit | Start-up, or on the `Generate(string)` call | Use 1–16 letters and digits, no underscore |
-| `DuplicateEntityPrefixException` | The same prefix is registered for two entity types, or one entity type is registered twice | Start-up | Give each entity type its own prefix, and register it once |
+| `DuplicateEntityPrefixException` | The same prefix is registered for two entity types, or one entity type is registered twice — by either registration style, or one of each | Start-up | Give each entity type its own prefix, and register it once |
 | `EntityPrefixNotRegisteredException` | `Generate<TEntity>()` is called for a type with no registered prefix | On the call | Register the type, or use `Generate(string)` |
 
 The first two are start-up failures by design. A duplicate prefix defeats the whole point — you
 could no longer tell from `acc_01k2f9…` whether you were looking at an `Account` or an `Accrual` —
 so the process refuses to start rather than let it through. Prefixes are compared **ignoring case**,
 so `usr` and `USR` count as a collision.
+
+When a bad prefix comes from an `[EntityPrefix]` attribute, the message names the type carrying it.
+A fluent registration leaves a stack trace pointing at the line you wrote; an attribute leaves
+nothing, and *"contains the character '!' at index 3"* is not much help across two hundred classes.
 
 Each exception carries the details as properties, not just in the message:
 
@@ -296,11 +383,41 @@ Three things get it there:
   This is also why UUIDv7 generation here is about 35 times faster than the framework's own
   `Guid.CreateVersion7()`, while producing a value that is conformant and indistinguishable from it.
 - **A frozen lookup.** Entity prefixes go into a `FrozenDictionary` once at start-up, so resolving
-  `Generate<User>()` to `"usr_"` is a couple of nanoseconds.
+  `Generate<User>()` to `"usr_"` is a couple of nanoseconds. Prefixes declared with
+  `[EntityPrefix]` land in the same dictionary — the assembly scan happens during start-up and
+  the numbers above are unchanged by it.
 
 **Thread safety.** The generator is immutable and registered as a singleton; call it from as many
 threads as you like. There are no locks anywhere — the monotonic counter and the entropy buffer are
 both thread-local — so throughput scales with cores rather than contending.
+
+---
+
+## Trimming and AOT
+
+The package is marked `IsTrimmable` and `IsAotCompatible`, and everything in it is trim-safe **except
+the three assembly-scanning methods**, which are annotated `[RequiresUnreferencedCode]`. The trimmer
+cannot see a type that is only ever found by reflection, so it is free to remove one — and a removed
+entity type is a prefix that silently goes missing.
+
+That annotation is the whole reason assemblies are named explicitly rather than discovered: it keeps
+the reflective surface down to three methods you opted into, instead of spreading it across the
+package.
+
+In practice:
+
+- **If you do not publish trimmed or AOT** — the overwhelming majority of applications — this
+  changes nothing and you will never see a warning.
+- **If you do**, register with `RegisterEntity<TEntity>` and you stay completely clean. Use a scan
+  and you get one `IL2026` warning, on your own line, telling you which method caused it.
+
+```
+warning IL2026: Using member 'RegisterEntitiesFromAssemblyContaining<TMarker>()' which has
+'RequiresUnreferencedCodeAttribute' can break functionality when trimming application code.
+```
+
+There is no third option where scanning is both convenient and trim-safe. Reflection over types the
+compiler never sees is exactly what trimming cannot support.
 
 ---
 
@@ -376,8 +493,22 @@ Long enough for a readable abbreviation, short enough that the prefix never domi
 identifier. If you find yourself wanting more, the prefix is probably trying to be a description.
 
 **Can I register prefixes with an attribute instead?**
-Not currently. Fluent registration keeps a single source of truth and validates everything at
-start-up without reflection or assembly scanning.
+Yes — put `[EntityPrefix("usr")]` on the type and call
+`options.RegisterEntitiesFromAssemblyContaining<User>()` at start-up. See
+[Registering entity prefixes](#registering-entity-prefixes). The scan runs once during start-up, so
+identifier generation is no slower than the fluent route; you name the assemblies rather than the
+library hunting for them, for the reasons set out there.
+
+**Which registration style should I use?**
+Fluent if you have a handful of entities, or if you publish trimmed or AOT. Attributes once the
+registration list is long enough that keeping it in step with the domain is its own chore. There is
+no penalty for mixing them, and no run-time difference between them at all — both end up as entries
+in the same frozen dictionary before your first request is served.
+
+**Can I override an attributed prefix with a `RegisterEntity` call?**
+No, that throws. It would mean a type whose prefix depends on the order two lines ran in, and the
+usual reason to want it — a copy-paste slip — is exactly what the exception is there to catch. If
+you need a different prefix, change the attribute.
 
 ---
 
