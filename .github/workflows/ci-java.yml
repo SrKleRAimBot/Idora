@@ -1,0 +1,62 @@
+name: CI Idora.Java
+
+on:
+  push:
+    branches: [main]
+    paths: ['Idora.Java/**', 'spec/**', '.github/workflows/ci-java.yml']
+  pull_request:
+    branches: [main]
+    paths: ['Idora.Java/**', 'spec/**', '.github/workflows/ci-java.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # The minimum the library targets, and the LTS releases since.
+        java: [17, 21, 25]
+
+    defaults:
+      run:
+        working-directory: Idora.Java
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+
+      - name: Build and test
+        # Compiles with -Xlint:all -Werror, runs the suite (surefire pins user.timezone to
+        # Australia/Sydney so the UTC assertions are live), builds the javadoc and packages.
+        run: mvn -B verify
+
+      - name: Check the library has no runtime dependencies
+        # The zero-dependency promise is part of the artifact's contract, so it is enforced.
+        run: |
+          DEPS=$(mvn -B -q -pl idora dependency:list -DincludeScope=runtime -DoutputFile=/dev/stdout -DexcludeTransitive=false | grep -E '^\s+[a-z]' | grep -vx '\s*none' || true)
+          if [ -n "$DEPS" ]; then
+            echo "::error::the idora artifact has runtime dependencies:"; echo "$DEPS"; exit 1
+          fi
+
+      - name: Benchmark (smoke)
+        # One very short pass so the JMH harness keeps building and running; numbers from shared
+        # runners are not meaningful.
+        if: matrix.java == 21
+        run: |
+          mvn -B -pl benchmarks -am package -DskipTests
+          java -jar benchmarks/target/benchmarks.jar -wi 0 -i 1 -f 1 -r 100ms -t 1
+
+      - name: Upload artifact
+        if: matrix.java == 21
+        uses: actions/upload-artifact@v4
+        with:
+          name: idora-java
+          path: Idora.Java/idora/target/*.jar

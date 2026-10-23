@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.github.srkleraimbot</groupId>
+    <artifactId>idora-parent</artifactId>
+    <version>1.0.0</version>
+  </parent>
+
+  <artifactId>idora</artifactId>
+  <packaging>jar</packaging>
+
+  <name>Idora.Java</name>
+  <description>
+    Prefixed, time-ordered entity identifiers such as usr_01k2f9v8ta7m3x0qbrn4dzeh5c: a registered
+    prefix, an underscore, and a lowercase ULID or UUIDv7. Zero dependencies, Java 17+, JPMS module
+    io.github.srkleraimbot.idora. Part of the Idora family of identical-behaviour libraries.
+  </description>
+  <url>https://github.com/SrKleRAimBot/Idora</url>
+
+  <!-- Deliberately no runtime dependencies. -->
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <!-- The library has no annotation processors; say so rather than let javac search. -->
+          <proc>none</proc>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!--
+            A non-UTC zone, so that the tests asserting identifiers carry UTC timestamps would catch a
+            regression to local time. On a UTC host those assertions could not tell the difference.
+          -->
+          <argLine>-Duser.timezone=Australia/Sydney</argLine>
+          <systemPropertyVariables>
+            <idora.testVectors>${project.basedir}/../../spec/test-vectors.json</idora.testVectors>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <goals>
+              <goal>jar-no-fork</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Built on every `verify`, not only for releases, so a documentation error fails CI. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <configuration>
+          <failOnWarnings>true</failOnWarnings>
+          <failOnError>true</failOnError>
+          <doclint>all</doclint>
+          <quiet>true</quiet>
+          <release>${maven.compiler.release}</release>
+          <links>
+            <link>https://docs.oracle.com/en/java/javase/17/docs/api/</link>
+          </links>
+        </configuration>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>release</id>
+      <build>
+        <plugins>
+          <!--
+            Publish a self-contained POM: the parent is a build convenience and is not published, so
+            the deployed POM must not point at it.
+          -->
+          <plugin>
+            <groupId>org.codehaus.mojo</groupId>
+            <artifactId>flatten-maven-plugin</artifactId>
+            <configuration>
+              <flattenMode>ossrh</flattenMode>
+              <outputDirectory>${project.build.directory}</outputDirectory>
+              <updatePomFile>true</updatePomFile>
+            </configuration>
+            <executions>
+              <execution>
+                <id>flatten</id>
+                <phase>process-resources</phase>
+                <goals>
+                  <goal>flatten</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>
