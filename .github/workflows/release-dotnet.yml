@@ -1,0 +1,177 @@
+name: Release Idora.NET
+
+# Publishing is driven entirely by tags: `git tag Idora.NET/v1.0.0 && git push origin Idora.NET/v1.0.0`.
+# Each Idora package is released independently, so the tag names the package. The version comes
+# from the tag rather than the csproj, so the published package and the tag can never disagree.
+on:
+  push:
+    tags: ['Idora.NET/v*']
+
+  # Dry run only. This builds, tests, packs, verifies and uploads the package as a build
+  # artifact, but deliberately stops short of publishing: the login, push and release steps
+  # are gated on a tag push below.
+  #
+  # Publishing is irreversible, so it must not be reachable from an arbitrary branch with a
+  # hand-typed version. Restricting it to a tag is what makes "the tag and the published
+  # version can never disagree" actually true rather than merely conventional.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to pack for the dry run. Nothing is published.'
+        required: false
+        default: '0.0.0-dryrun'
+        type: string
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      # Required for Trusted Publishing: lets the job request an OIDC token from GitHub that
+      # nuget.org exchanges for a short-lived API key. No secrets are stored anywhere.
+      id-token: write
+      # Write, not read: the final step creates the GitHub release and uploads the packages to it.
+      contents: write
+
+    env:
+      # Deliberately not UTC, matching CI, so a local-time regression cannot slip through here
+      # either. See Idora.NET/tests/Idora.Tests/TimestampSourceTests.cs.
+      TZ: Australia/Sydney
+
+    defaults:
+      run:
+        working-directory: Idora.NET
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Source Link stamps the commit into the symbols package, which needs full history.
+          fetch-depth: 0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#Idora.NET/v}"
+          fi
+
+          # Guard against a mistyped tag producing a nonsense package version. NuGet versions
+          # are irreversible once published, so this is worth being strict about.
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$VERSION' is not a valid semantic version (expected e.g. 1.0.0 or 1.0.0-rc.1)"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "Publishing version $VERSION from tag $GITHUB_REF_NAME"
+          else
+            echo "Dry run for version $VERSION. Nothing will be published."
+          fi
+
+      - name: Build
+        run: dotnet build -c Release -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Test
+        # The package is never published unless the whole suite passes on the exact build
+        # that is about to be packed.
+        run: dotnet test -c Release --no-build --verbosity normal
+
+      - name: Pack
+        run: |
+          dotnet pack src/Idora/Idora.csproj \
+            -c Release --no-build \
+            -p:Version=${{ steps.version.outputs.version }} \
+            -o artifacts
+
+      - name: Verify package contents
+        # Cheap insurance against shipping a package missing its README, icon, or the assembly
+        # or XML documentation for any target framework. Far easier to catch here than after an
+        # irreversible push.
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PKG="artifacts/Idora.NET.$VERSION.nupkg"
+          test -f "$PKG" || { echo "::error::$PKG was not produced"; exit 1; }
+          test -f "artifacts/Idora.NET.$VERSION.snupkg" \
+            || { echo "::error::symbols package was not produced"; exit 1; }
+
+          # The expected lib/ layout is derived from the csproj rather than hard-coded, so that
+          # adding or removing a target framework cannot leave this check quietly validating a
+          # subset of what actually ships.
+          TFMS=$(sed -n 's/.*<TargetFrameworks>\(.*\)<\/TargetFrameworks>.*/\1/p' \
+            src/Idora/Idora.csproj | tr ';' ' ')
+          test -n "$TFMS" || { echo "::error::could not read TargetFrameworks from the csproj"; exit 1; }
+          echo "Target frameworks: $TFMS"
+
+          REQUIRED="README.md icon.png"
+          for tfm in $TFMS; do
+            REQUIRED="$REQUIRED lib/$tfm/Idora.dll lib/$tfm/Idora.xml"
+          done
+
+          CONTENTS=$(unzip -Z1 "$PKG")
+          echo "$CONTENTS"
+
+          for required in $REQUIRED; do
+            echo "$CONTENTS" | grep -qx "$required" \
+              || { echo "::error::package is missing $required"; exit 1; }
+          done
+
+          echo "Verified present: $REQUIRED"
+
+      - name: Upload package as a build artifact
+        # Kept regardless of whether the push succeeds, so a failed publish can be diagnosed.
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg-${{ steps.version.outputs.version }}
+          path: Idora.NET/artifacts/*
+
+      - name: Log in to NuGet (OIDC, short-lived key)
+        # Tag pushes only. A manually dispatched run stops at the artifact above.
+        if: github.event_name == 'push'
+        # Requested immediately before the push: these keys are valid for one hour, and each
+        # OIDC token can be exchanged exactly once.
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: SrKleRAimBot
+
+      - name: Push to nuget.org
+        # The irreversible step. Reachable only from a v* tag push.
+        if: github.event_name == 'push'
+        run: |
+          dotnet nuget push "artifacts/*.nupkg" \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Create GitHub release
+        # Tag pushes only, like the NuGet push above.
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Idora.NET v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: Idora.NET/artifacts/*
+
+      - name: Dry run summary
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          {
+            echo "### Dry run complete"
+            echo
+            echo "Version \`${{ steps.version.outputs.version }}\` was built, tested, packed and verified."
+            echo "**Nothing was published.** The package is attached to this run as an artifact."
+            echo
+            echo "To publish for real, push a tag: \`git tag Idora.NET/v1.0.0 && git push origin Idora.NET/v1.0.0\`"
+          } >> "$GITHUB_STEP_SUMMARY"

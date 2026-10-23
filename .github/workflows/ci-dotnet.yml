@@ -1,0 +1,58 @@
+name: CI Idora.NET
+
+on:
+  push:
+    branches: [main]
+    paths: ['Idora.NET/**', 'spec/**', '.github/workflows/ci-dotnet.yml']
+  pull_request:
+    branches: [main]
+    paths: ['Idora.NET/**', 'spec/**', '.github/workflows/ci-dotnet.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: Idora.NET
+
+    env:
+      # Deliberately not UTC. Identifiers must be stamped from UTC no matter where the host thinks
+      # it is, and a local-time bug is invisible on a runner that is already in UTC. Running the
+      # suite at a non-zero offset makes the assertions in TimestampSourceTests live.
+      TZ: Australia/Sydney
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Source Link stamps the commit into the symbols package, which needs full history.
+          fetch-depth: 0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        # Builds net8.0, net9.0 and net10.0. Warnings are errors, so this also enforces that every
+        # public member carries XML documentation.
+        run: dotnet build -c Release --no-restore
+
+      - name: Test
+        run: dotnet test -c Release --no-build --verbosity normal
+
+      - name: Pack
+        run: dotnet pack src/Idora/Idora.csproj -c Release --no-build -o artifacts
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: Idora.NET/artifacts/*

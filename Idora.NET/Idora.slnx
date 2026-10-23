@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Idora/Idora.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Idora.Benchmarks/Idora.Benchmarks.csproj" />
+    <Project Path="tests/Idora.Tests/Idora.Tests.csproj" />
+    <Project Path="tests/Idora.Tests.Fixtures/Idora.Tests.Fixtures.csproj" />
+  </Folder>
+</Solution>
