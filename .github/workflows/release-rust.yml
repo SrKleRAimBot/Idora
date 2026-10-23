@@ -1,0 +1,79 @@
+name: Release Idora.Rust
+
+# Publishing is driven entirely by tags: `git tag Idora.Rust/v1.0.0 && git push origin Idora.Rust/v1.0.0`.
+# The tag must match the version in Cargo.toml, which crates.io reads from the package itself.
+on:
+  push:
+    tags: ['Idora.Rust/v*']
+
+  # Dry run only: verifies and packages, but never publishes.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  TZ: Australia/Sydney
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      # Required for crates.io trusted publishing: the job exchanges a GitHub OIDC token for a
+      # short-lived crates.io token. No long-lived token is stored anywhere.
+      id-token: write
+      contents: write
+
+    defaults:
+      run:
+        working-directory: Idora.Rust
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        run: rustup update stable && rustup default stable
+
+      - name: Check the tag matches Cargo.toml
+        id: tag
+        if: github.event_name == 'push'
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#Idora.Rust/v}"
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+          CRATE_VERSION=$(cargo metadata --format-version 1 --no-deps | sed -n 's/.*"name":"idora","version":"\([^"]*\)".*/\1/p')
+          echo "Tag: $TAG_VERSION, Cargo.toml: $CRATE_VERSION"
+          if [ "$TAG_VERSION" != "$CRATE_VERSION" ]; then
+            echo "::error::tag version $TAG_VERSION does not match Cargo.toml version $CRATE_VERSION"
+            exit 1
+          fi
+
+      - name: Test
+        run: cargo test
+
+      - name: Package
+        run: cargo package
+
+      - name: Upload crate as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crate
+          path: Idora.Rust/target/package/*.crate
+
+      - name: Authenticate with crates.io (OIDC, short-lived token)
+        if: github.event_name == 'push'
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
+      - name: Publish to crates.io
+        # The irreversible step. Reachable only from an Idora.Rust/v* tag push.
+        if: github.event_name == 'push'
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+      - name: Create GitHub release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Idora.Rust v${{ steps.tag.outputs.version }}
+          generate_release_notes: true
+          files: Idora.Rust/target/package/*.crate

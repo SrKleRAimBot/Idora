@@ -1,0 +1,64 @@
+name: Release Idora.Go
+
+# Go modules are published by their tag: once `Idora.Go/v1.2.3` exists, `go get` and the module
+# proxy can fetch that version, and there is nothing to upload. Go requires a module in a
+# subdirectory to be tagged with that subdirectory as a prefix, which is why the tag is
+# `Idora.Go/vX.Y.Z` rather than `vX.Y.Z`.
+#
+# This workflow verifies the tagged commit, asks the module proxy to index the new version so it
+# is available immediately, and opens a GitHub release.
+on:
+  push:
+    tags: ['Idora.Go/v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    env:
+      TZ: Australia/Sydney
+
+    defaults:
+      run:
+        working-directory: Idora.Go
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: Idora.Go/go.mod
+
+      - name: Determine version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#Idora.Go/}"
+          if ! echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$VERSION' is not a valid Go module version (expected e.g. v1.0.0)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -race -count=1 ./...
+
+      - name: Ask the module proxy to index the release
+        working-directory: ${{ runner.temp }}
+        run: |
+          go mod init proxy-warmup
+          GOPROXY=https://proxy.golang.org GOFLAGS=-mod=mod \
+            go list -m "github.com/SrKleRAimBot/Idora/Idora.Go@${{ steps.version.outputs.version }}"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Idora.Go ${{ steps.version.outputs.version }}
+          generate_release_notes: true

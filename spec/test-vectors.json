@@ -1,0 +1,220 @@
+{
+  "$comment": "Shared conformance vectors. Every Idora package must reproduce these exactly. Random fields are big-endian hex; for ULID the 10 bytes are the 80-bit random field (bits 79..0), for UUIDv7 they are octets 6..15 before the version and variant bits are applied.",
+  "ulid": [
+    {
+      "timestampMs": 0,
+      "randomHex": "00000000000000000000",
+      "expected": "00000000000000000000000000"
+    },
+    {
+      "timestampMs": 1,
+      "randomHex": "00000000000000000001",
+      "expected": "00000000010000000000000001"
+    },
+    {
+      "timestampMs": 281474976710655,
+      "randomHex": "ffffffffffffffffffff",
+      "expected": "7zzzzzzzzzzzzzzzzzzzzzzzzz"
+    },
+    {
+      "timestampMs": 1754568000000,
+      "randomHex": "00112233445566778899",
+      "expected": "01k226e0g0008j4ct4ank7f24s"
+    },
+    {
+      "timestampMs": 1754568000001,
+      "randomHex": "ffeeddccbbaa99887766",
+      "expected": "01k226e0g1zzqdvk5vnacrgxv6"
+    },
+    {
+      "timestampMs": 1469918176385,
+      "randomHex": "8000000000000000000f",
+      "expected": "01aryz6s41g00000000000000f"
+    },
+    {
+      "timestampMs": 1700000000000,
+      "randomHex": "0123456789abcdef0123",
+      "expected": "01hf7yat0004hmasw9nf6yy093"
+    },
+    {
+      "timestampMs": 1754568000000,
+      "randomHex": "7fffffffffffffffffff",
+      "expected": "01k226e0g0fzzzzzzzzzzzzzzz"
+    }
+  ],
+  "uuidv7": [
+    {
+      "timestampMs": 0,
+      "randomHex": "00000000000000000000",
+      "expected": "00000000000070008000000000000000"
+    },
+    {
+      "timestampMs": 1,
+      "randomHex": "00000000000000000001",
+      "expected": "00000000000170008000000000000001"
+    },
+    {
+      "timestampMs": 281474976710655,
+      "randomHex": "ffffffffffffffffffff",
+      "expected": "ffffffffffff7fffbfffffffffffffff"
+    },
+    {
+      "timestampMs": 1754568000000,
+      "randomHex": "00112233445566778899",
+      "expected": "0198846702007011a233445566778899"
+    },
+    {
+      "timestampMs": 1754568000001,
+      "randomHex": "ffeeddccbbaa99887766",
+      "expected": "0198846702017fee9dccbbaa99887766"
+    },
+    {
+      "timestampMs": 1469918176385,
+      "randomHex": "8000000000000000000f",
+      "expected": "01563df364817000800000000000000f"
+    },
+    {
+      "timestampMs": 1700000000000,
+      "randomHex": "0123456789abcdef0123",
+      "expected": "018bcfe568007123856789abcdef0123"
+    },
+    {
+      "timestampMs": 1754568000000,
+      "randomHex": "7fffffffffffffffffff",
+      "expected": "0198846702007fffbfffffffffffffff"
+    }
+  ],
+  "ulidMonotonic": [
+    {
+      "description": "same millisecond increments the 80-bit random field by one",
+      "previous": {
+        "timestampMs": 1754568000000,
+        "randomHex": "00000000000000000000"
+      },
+      "nowMs": 1754568000000,
+      "expected": {
+        "timestampMs": 1754568000000,
+        "randomHex": "00000000000000000001",
+        "encoded": "01k226e0g00000000000000001"
+      }
+    },
+    {
+      "description": "carry from the low 64 bits into the high 16 bits",
+      "previous": {
+        "timestampMs": 1754568000000,
+        "randomHex": "0000ffffffffffffffff"
+      },
+      "nowMs": 1754568000000,
+      "expected": {
+        "timestampMs": 1754568000000,
+        "randomHex": "00010000000000000000",
+        "encoded": "01k226e0g0000g000000000000"
+      }
+    },
+    {
+      "description": "a clock that steps backwards keeps the previous millisecond and increments",
+      "previous": {
+        "timestampMs": 1754568000005,
+        "randomHex": "0000000000000000000a"
+      },
+      "nowMs": 1754568000000,
+      "expected": {
+        "timestampMs": 1754568000005,
+        "randomHex": "0000000000000000000b",
+        "encoded": "01k226e0g5000000000000000b"
+      }
+    },
+    {
+      "description": "an exhausted random field borrows the next millisecond and reseeds",
+      "previous": {
+        "timestampMs": 1754568000000,
+        "randomHex": "ffffffffffffffffffff"
+      },
+      "nowMs": 1754568000000,
+      "expected": {
+        "timestampMs": 1754568000001,
+        "randomHex": null
+      }
+    }
+  ],
+  "prefixes": {
+    "valid": [
+      "a",
+      "usr",
+      "USR",
+      "Usr1",
+      "0",
+      "abcdefghijklmnop",
+      "A1b2C3d4E5f6G7h8"
+    ],
+    "invalid": [
+      {
+        "prefix": "",
+        "reason": "empty"
+      },
+      {
+        "prefix": "abcdefghijklmnopq",
+        "reason": "tooLong"
+      },
+      {
+        "prefix": "user_account",
+        "reason": "separator",
+        "index": 4
+      },
+      {
+        "prefix": "_",
+        "reason": "separator",
+        "index": 0
+      },
+      {
+        "prefix": "us-r",
+        "reason": "character",
+        "index": 2
+      },
+      {
+        "prefix": "us r",
+        "reason": "character",
+        "index": 2
+      },
+      {
+        "prefix": "usr!",
+        "reason": "character",
+        "index": 3
+      },
+      {
+        "prefix": "caf\u00e9",
+        "reason": "character",
+        "index": 3
+      },
+      {
+        "prefix": "\u0661\u0662",
+        "reason": "character",
+        "index": 0
+      }
+    ],
+    "collidingPairs": [
+      [
+        "usr",
+        "USR"
+      ],
+      [
+        "Acc",
+        "aCC"
+      ],
+      [
+        "inv",
+        "inv"
+      ]
+    ],
+    "distinctPairs": [
+      [
+        "usr",
+        "usr1"
+      ],
+      [
+        "ord",
+        "odr"
+      ]
+    ]
+  }
+}

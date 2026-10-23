@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <AnalysisMode>Recommended</AnalysisMode>
+
+    <!-- Public API: XML docs are part of the deliverable, and a missing one is a build error. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- Enables trimming/AOT friendliness checks for consumers who publish trimmed. -->
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Package metadata">
+    <IsPackable>true</IsPackable>
+    <PackageId>Idora.NET</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Jake Seracino</Authors>
+    <Description>Idora generates prefixed, time-ordered entity identifiers such as usr_01k2f9v8ta7m3x0qbrn4dzeh5c. Each ID carries a per-entity prefix so you can tell what it identifies at a glance, followed by a lowercase ULID (default) or UUIDv7 so IDs sort by creation time and index well. Prefixes are registered once at startup, either fluently at DI setup or with an [EntityPrefix] attribute on the entity, eliminating magic strings and catching collisions at startup. Formerly published as UserFriendlyIds.</Description>
+    <PackageTags>idora;id;identifier;ulid;uuid;uuidv7;guid;prefix;prefixed-id;sortable;time-ordered;dependency-injection;attribute</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReleaseNotes>
+      1.0.0 - UserFriendlyIds is now Idora.NET.
+
+      This is the UserFriendlyIds 1.1.0 feature set under a new name, as part of the Idora family of
+      identically behaving packages for .NET, JavaScript/TypeScript, Java, Go and Rust. Identifiers
+      are byte-for-byte the same format, so existing stored IDs remain valid.
+
+      Breaking renames, all mechanical:
+
+      * Package: UserFriendlyIds -> Idora.NET. Namespace and assembly: UserFriendlyIds -> Idora.
+      * services.AddUserFriendlyIds(...) -> services.AddIdora(...).
+      * IUserFriendlyIdGenerator -> IIdoraGenerator; UserFriendlyIdGenerator -> IdoraGenerator.
+      * UserFriendlyIdOptions -> IdoraOptions; UserFriendlyIdsException -> IdoraException.
+
+      Everything else - EntityPrefixAttribute, IEntityPrefixRegistry, IdGenerationStrategy and the
+      other exception types - keeps its name and behaviour.
+    </PackageReleaseNotes>
+    <PackageProjectUrl>https://github.com/SrKleRAimBot/Idora</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/SrKleRAimBot/Idora</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <Copyright>Copyright (c) 2026 Jake Seracino</Copyright>
+
+    <!-- Source Link (built into the SDK) plus a symbols package, so consumers can step into this code. -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="\" />
+    <None Include="icon.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Idora.Tests" />
+    <InternalsVisibleTo Include="Idora.Benchmarks" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,57 @@
+{
+  "name": "idora.js",
+  "version": "1.0.0",
+  "description": "Idora.JS: prefixed, time-ordered entity identifiers such as usr_01k2f9v8ta7m3x0qbrn4dzeh5c. A per-entity prefix tells you what an ID identifies; a lowercase ULID (default) or UUIDv7 makes IDs sort by creation time. Zero dependencies.",
+  "keywords": [
+    "idora",
+    "id",
+    "identifier",
+    "ulid",
+    "uuid",
+    "uuidv7",
+    "prefix",
+    "prefixed-id",
+    "sortable",
+    "time-ordered",
+    "decorator"
+  ],
+  "homepage": "https://github.com/SrKleRAimBot/Idora/tree/main/Idora.JS#readme",
+  "bugs": "https://github.com/SrKleRAimBot/Idora/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SrKleRAimBot/Idora.git",
+    "directory": "Idora.JS"
+  },
+  "license": "MIT",
+  "author": "Jake Seracino",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "!dist/**/*.tsbuildinfo"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:test": "tsc -p tsconfig.test.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "npm run build:test && node --test build/test/*.test.js",
+    "bench": "npm run build:test && node build/bench/generation.js",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2"
+  }
+}

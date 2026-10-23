@@ -1,0 +1,126 @@
+name: Release Idora.JS
+
+# Publishing is driven entirely by tags: `git tag Idora.JS/v1.0.0 && git push origin Idora.JS/v1.0.0`.
+# The version comes from the tag rather than package.json, so the published package and the tag
+# can never disagree.
+on:
+  push:
+    tags: ['Idora.JS/v*']
+
+  # Dry run only: builds, tests, packs and verifies, but never publishes. Publishing is
+  # irreversible, so it is reachable only from a tag push.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to pack for the dry run. Nothing is published.'
+        required: false
+        default: '0.0.0-dryrun'
+        type: string
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      # Required for npm trusted publishing and provenance: the job requests a GitHub OIDC token
+      # that npm exchanges for a short-lived publish credential. No npm token is stored anywhere.
+      id-token: write
+      # Write, not read: the final step creates the GitHub release.
+      contents: write
+
+    env:
+      TZ: Australia/Sydney
+
+    defaults:
+      run:
+        working-directory: Idora.JS
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Trusted publishing needs npm 11.5.1 or later, which ships with Node.js 24.
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: Idora.JS/package-lock.json
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#Idora.JS/v}"
+          fi
+
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$VERSION' is not a valid semantic version (expected e.g. 1.0.0 or 1.0.0-rc.1)"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install
+        run: npm ci
+
+      - name: Stamp the version from the tag
+        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Test
+        # The package is never published unless the whole suite passes on the exact source that is
+        # about to be packed.
+        run: npm test
+
+      - name: Pack
+        run: npm pack
+
+      - name: Verify package contents
+        # Cheap insurance against shipping a package missing its README, licence, entry point or
+        # type declarations — and against a runtime dependency creeping in.
+        run: |
+          PKG="idora.js-${{ steps.version.outputs.version }}.tgz"
+          test -f "$PKG" || { echo "::error::$PKG was not produced"; exit 1; }
+
+          CONTENTS=$(tar -tzf "$PKG")
+          echo "$CONTENTS"
+          for required in package/package.json package/README.md package/LICENSE package/dist/index.js package/dist/index.d.ts; do
+            echo "$CONTENTS" | grep -qx "$required" || { echo "::error::package is missing $required"; exit 1; }
+          done
+
+          node -e '
+            const pkg = require("./package.json");
+            for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
+              if (pkg[field] && Object.keys(pkg[field]).length > 0) {
+                console.error(`::error::package.json declares ${field}`);
+                process.exit(1);
+              }
+            }
+          '
+
+      - name: Upload package as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-package-${{ steps.version.outputs.version }}
+          path: Idora.JS/*.tgz
+
+      - name: Publish to npm
+        # The irreversible step. Reachable only from an Idora.JS/v* tag push. A prerelease version
+        # is published under the "next" dist-tag so that it never becomes "latest".
+        if: github.event_name == 'push'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          case "$VERSION" in
+            *-*) npm publish "idora.js-$VERSION.tgz" --provenance --access public --tag next ;;
+            *)   npm publish "idora.js-$VERSION.tgz" --provenance --access public ;;
+          esac
+
+      - name: Create GitHub release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Idora.JS v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: Idora.JS/*.tgz
