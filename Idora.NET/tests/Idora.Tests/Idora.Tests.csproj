@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      Only the .NET 10 runtime is required to run the suite. The net8.0 code path (the hand-rolled
+      UUIDv7 factory used when Guid.CreateVersion7 is unavailable) is compiled into every target
+      framework and unit-tested directly here, so it is covered without needing a .NET 8 runtime.
+      CI still builds the library for all three target frameworks.
+    -->
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The shared cross-language conformance vectors; see ConformanceTests. -->
+    <None Include="../../../spec/test-vectors.json" CopyToOutputDirectory="PreserveNewest" Link="test-vectors.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Idora/Idora.csproj" />
+    <ProjectReference Include="../Idora.Tests.Fixtures/Idora.Tests.Fixtures.csproj" />
+  </ItemGroup>
+
+</Project>
