@@ -1,0 +1,31 @@
+[package]
+name = "idora"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Idora.Rust: prefixed, time-ordered entity identifiers (usr_01k2f9v8ta7m3x0qbrn4dzeh5c) built on ULID or UUIDv7, with zero dependencies."
+license = "MIT"
+repository = "https://github.com/SrKleRAimBot/Idora"
+homepage = "https://github.com/SrKleRAimBot/Idora/tree/main/Idora.Rust"
+documentation = "https://docs.rs/idora"
+readme = "README.md"
+keywords = ["id", "ulid", "uuid", "identifier", "prefix"]
+categories = ["encoding", "data-structures", "database"]
+include = ["src/**/*.rs", "Cargo.toml", "README.md", "LICENSE"]
+
+# Deliberately empty. Idora has no dependencies of any kind, including dev-dependencies: the
+# entropy source is a direct call into the operating system, and the test and benchmark harnesses
+# are hand-written on top of std.
+[dependencies]
+
+[[bench]]
+name = "generation"
+harness = false
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_op_in_unsafe_fn = "deny"
+unsafe_code = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }

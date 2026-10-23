@@ -1,0 +1,2 @@
+# Proper nouns that appear in the documentation and are not code.
+doc-valid-idents = ["UUIDv7", "UUIDv4", "SipHash", "FreeBSD", "OpenBSD", "NetBSD", "DragonFly", ".."]
