@@ -1,0 +1,58 @@
+name: CI Idora.Go
+
+on:
+  push:
+    branches: [main]
+    paths: ['Idora.Go/**', 'spec/**', '.github/workflows/ci-go.yml']
+  pull_request:
+    branches: [main]
+    paths: ['Idora.Go/**', 'spec/**', '.github/workflows/ci-go.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # The minimum in go.mod, and the newest stable release.
+        go: ['1.23', 'stable']
+
+    env:
+      # Deliberately not UTC, so the time-zone assertions in timestamp_test.go are live.
+      TZ: Australia/Sydney
+
+    defaults:
+      run:
+        working-directory: Idora.Go
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache-dependency-path: Idora.Go/go.mod
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; echo "::error::files above are not gofmt-formatted"; exit 1; }
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Check the module has no dependencies
+        # The zero-dependency promise is part of the module's contract, so it is enforced.
+        run: |
+          if grep -Eq '^\s*require' go.mod; then
+            echo "::error::go.mod declares a dependency"; cat go.mod; exit 1
+          fi
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      - name: Benchmark (smoke)
+        # A single short pass so the benchmarks keep compiling and running; numbers from shared CI
+        # runners are not meaningful.
+        run: go test -run '^$' -bench . -benchtime 100x ./...
