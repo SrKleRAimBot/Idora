@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.KeyDeserializer;
 import com.fasterxml.jackson.databind.deser.ContextualKeyDeserializer;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import io.github.srkleraimbot.idora.IdoraId;
 import io.github.srkleraimbot.idora.InvalidIdException;
 
@@ -65,7 +66,13 @@ public final class IdoraIdKeyDeserializer extends KeyDeserializer implements Con
         try {
             return expectedPrefix == null ? IdoraId.parse(key) : IdoraId.parse(key, expectedPrefix);
         } catch (InvalidIdException e) {
-            JsonMappingException failure = context.weirdKeyException(IdoraId.class, key, e.getMessage());
+            // Built here rather than with context.weirdKeyException, whose message quotes the key
+            // again, up to Jackson's own limit: Idora's message already quotes it, shortened. The
+            // full key stays on getValue().
+            InvalidFormatException failure = InvalidFormatException.from(
+                    context.getParser(),
+                    "Cannot deserialize Map key of type `" + IdoraId.class.getName() + "`: " + e.getMessage(),
+                    key, IdoraId.class);
             failure.initCause(e);
             throw failure;
         }

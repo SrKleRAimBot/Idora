@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.deser.ContextualDeserializer;
 import com.fasterxml.jackson.databind.deser.std.StdScalarDeserializer;
 import com.fasterxml.jackson.databind.exc.InvalidDefinitionException;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.fasterxml.jackson.databind.type.LogicalType;
 import io.github.srkleraimbot.idora.IdoraGenerator;
 import io.github.srkleraimbot.idora.IdoraId;
@@ -85,7 +86,12 @@ public final class IdoraIdDeserializer extends StdScalarDeserializer<IdoraId> im
         try {
             return expectedPrefix == null ? IdoraId.parse(text) : IdoraId.parse(text, expectedPrefix);
         } catch (InvalidIdException e) {
-            JsonMappingException failure = context.weirdStringException(text, IdoraId.class, e.getMessage());
+            // Built here rather than with context.weirdStringException, whose message quotes the
+            // text again, up to Jackson's own limit: Idora's message already quotes it, shortened.
+            // The full text stays on getValue().
+            InvalidFormatException failure = InvalidFormatException.from(
+                    parser, "Cannot deserialize value of type `" + IdoraId.class.getName() + "`: " + e.getMessage(),
+                    text, IdoraId.class);
             failure.initCause(e);
             throw failure;
         }

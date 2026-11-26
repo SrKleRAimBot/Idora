@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -123,6 +124,27 @@ class IdoraModuleTest {
         assertInstanceOf(InvalidIdException.class, exception.getCause());
         assertEquals("from", exception.getPath().get(0).getFieldName());
         assertTrue(exception.getMessage().contains("from"), exception.getMessage());
+    }
+
+    @Test
+    void read_aLongMalformedIdentifier_doesNotRepeatItInTheMessage_asAValueOrAMapKey() {
+        // Arrange: input from a request, rejected. Idora quotes at most 64 characters of it, and
+        // the Jackson exception must not quote it again at length; a marker past character 100
+        // shows whether it did.
+        String text = "usr_" + "x".repeat(100) + "MARKER" + "x".repeat(1000);
+
+        // Act
+        InvalidFormatException asValue = assertThrows(InvalidFormatException.class,
+                () -> mapper.readValue("{\"from\":\"" + text + "\"}", Transfer.class));
+        InvalidFormatException asKey = assertThrows(InvalidFormatException.class,
+                () -> mapper.readValue("{\"" + text + "\":3}", new TypeReference<Map<IdoraId, Integer>>() { }));
+
+        // Assert
+        for (InvalidFormatException exception : List.of(asValue, asKey)) {
+            assertFalse(exception.getMessage().contains("MARKER"), exception.getMessage());
+            assertEquals(text, exception.getValue());
+            assertInstanceOf(InvalidIdException.class, exception.getCause());
+        }
     }
 
     @ParameterizedTest
