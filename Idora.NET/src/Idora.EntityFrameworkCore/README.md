@@ -183,12 +183,12 @@ bounds come from [`IdoraId.LowerBound` and `IdoraId.UpperBound`](https://github.
 
 The range is meaningful for identifiers of one prefix and one format, which is what a key column
 holds. The database compares them with the column's collation, and the range needs one that orders
-the digits before the lowercase letters, character by character. A binary collation guarantees it,
-and the usual linguistic ones agree too, case- and accent-insensitive ones included, because after
-the shared prefix an identifier holds only ASCII digits and lowercase letters. A **numeric**
-collation, such as a PostgreSQL ICU collation with `kn-true` (natural sort), compares a run of
-digits as one number, puts the lower bound after the upper one, and returns nothing. To be certain,
-give the key column a binary collation, for example on PostgreSQL:
+the identifier's characters exactly as a byte comparison does. A binary collation guarantees it.
+A linguistic collation may not: Czech and Slovak treat `ch` as one letter, Danish `aa`, Lithuanian
+sorts `y` before `j`, Estonian `z` before `t`, and a **numeric** collation, such as a PostgreSQL ICU
+collation with `kn-true`, compares runs of digits as numbers. Any of them can put a bound on the
+wrong side of a row, and the range silently misses it. Give the key column a binary collation, for
+example on PostgreSQL:
 
 ```csharp
 builder.Entity<Order>().Property(order => order.Id).UseCollation("C");

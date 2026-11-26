@@ -122,9 +122,12 @@ await db.select().from(users).where(createdBetween(users.id, from, to));
 //   $1 = 'usr_01k226e0g00000000000000000', $2 = 'usr_01k2…zzzzzzzzzzzzzzzz'
 ```
 
-The database compares them with the column's collation, which must order the digits before the lowercase
-letters character by character: binary and ordinary linguistic collations do, but a numeric
-("natural sort") collation does not, and returns nothing for the range. See
+The database compares them with the column's collation, so give the column a binary or `C`
+collation. A linguistic collation is safe only if it orders the identifier's characters exactly as
+a byte comparison does, and many do not: Czech and Slovak treat `ch` as one letter, Danish `aa`,
+Lithuanian sorts `y` before `j`, Estonian `z` before `t`, and a numeric ("natural sort")
+collation compares runs of digits as numbers. Any of them can put a bound on the wrong side of a
+row, so the range silently misses it. See
 [§6.4 of the specification](https://github.com/SrKleRAimBot/Idora/blob/main/spec/SPECIFICATION.md#64-range-bounds).
 
 The bounds are the lowest and highest identifiers any generator can mint for the column's entity
@@ -139,9 +142,9 @@ For any other column of identifiers, say what it holds:
 createdBetween(legacy.ref, from, to, { prefix: 'usr', format: 'ulid' });
 ```
 
-A range compares correctly in the binary and `C` collations, and in the usual linguistic ones,
-which agree with them on ASCII digits and lowercase letters. A column holding identifiers of more
-than one prefix or format is not a range; filter each prefix separately.
+A range compares correctly only in a collation that orders identifiers as bytes, binary or `C`
+(see above). A column holding identifiers of more than one prefix or format is not a range; filter
+each prefix separately.
 
 ---
 

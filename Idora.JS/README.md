@@ -453,9 +453,12 @@ compare correctly against identifiers of the **same prefix and format** — the 
 column, which holds one entity type in one format. A time before 1970 or after the year 10889,
 the range a 48-bit timestamp covers, throws a `RangeError`.
 
-The database compares them with the column's collation, which must order the digits before the lowercase
-letters character by character: binary and ordinary linguistic collations do, but a numeric
-("natural sort") collation does not, and returns nothing for the range. See
+The database compares them with the column's collation, so give the column a binary or `C`
+collation. A linguistic collation is safe only if it orders the identifier's characters exactly as
+a byte comparison does, and many do not: Czech and Slovak treat `ch` as one letter, Danish `aa`,
+Lithuanian sorts `y` before `j`, Estonian `z` before `t`, and a numeric ("natural sort")
+collation compares runs of digits as numbers. Any of them can put a bound on the wrong side of a
+row, so the range silently misses it. See
 [§6.4 of the specification](https://github.com/SrKleRAimBot/Idora/blob/main/spec/SPECIFICATION.md#64-range-bounds).
 
 The [Drizzle integration](#integrations) wraps this up as `createdBetween(users.id, from, to)`.

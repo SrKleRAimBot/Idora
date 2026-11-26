@@ -42,9 +42,10 @@ export interface IdRange {
  * does not return. There is no need for a separate `created_at` column just to filter on.
  *
  * The bounds are the lowest and highest identifiers any generator can mint for the column's entity
- * type in its format; see `IdoraId.lowerBound` in `idora.js`. They compare correctly in the binary
- * and `C` collations, and in the usual linguistic ones, which agree with them on ASCII digits and
- * lowercase letters.
+ * type in its format; see `IdoraId.lowerBound` in `idora.js`. They compare correctly in a collation
+ * that orders identifiers as bytes, binary or `C`. Many linguistic collations do not (Czech treats
+ * `ch` as one letter, Lithuanian sorts `y` before `j`, a numeric collation compares digit runs as
+ * numbers), and can put a bound on the wrong side of a row, so the range silently misses it.
  *
  * @param column A column declared with `idoraId` or `idoraPrimaryKey` from this package — or any
  * column of identifiers, when `range` says what prefix and format it holds.
