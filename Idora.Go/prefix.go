@@ -14,6 +14,15 @@ const (
 	maxIDLen = MaxPrefixLen + 1 + uuidV7Len
 )
 
+// ValidatePrefix reports whether prefix is a valid entity prefix: 1 to [MaxPrefixLen] ASCII
+// letters or digits. It returns nil or an [*InvalidPrefixError] describing the first rule the
+// prefix breaks, and does not allocate when the prefix is valid.
+//
+// Registration and [Generator.GenerateWithPrefix] already validate their prefixes; this is for
+// code that accepts a prefix itself, such as configuration or middleware, and wants to reject a
+// bad one early.
+func ValidatePrefix(prefix string) error { return validatePrefix(prefix) }
+
 // validatePrefix applies the rules of spec §2 in order and reports the first that fails. It does
 // not allocate when the prefix is valid.
 //

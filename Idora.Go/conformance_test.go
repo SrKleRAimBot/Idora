@@ -5,10 +5,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
+	"time"
 )
 
 // The shared vectors live outside this module, in the Idora repository's spec directory. A copy
@@ -50,6 +53,27 @@ type vectors struct {
 		CollidingPairs [][2]string `json:"collidingPairs"`
 		DistinctPairs  [][2]string `json:"distinctPairs"`
 	} `json:"prefixes"`
+	IDs struct {
+		Valid []struct {
+			ID          string `json:"id"`
+			Prefix      string `json:"prefix"`
+			Value       string `json:"value"`
+			Format      string `json:"format"`
+			TimestampMs int64  `json:"timestampMs"`
+		} `json:"valid"`
+		Invalid []struct {
+			ID             string  `json:"id"`
+			Reason         string  `json:"reason"`
+			ExpectedPrefix *string `json:"expectedPrefix"`
+		} `json:"invalid"`
+		Ordered []string `json:"ordered"`
+		Bounds  []struct {
+			TimestampMs int64  `json:"timestampMs"`
+			Format      string `json:"format"`
+			Lower       string `json:"lower"`
+			Upper       string `json:"upper"`
+		} `json:"bounds"`
+	} `json:"ids"`
 }
 
 func loadVectors(t *testing.T) *vectors {
@@ -68,7 +92,8 @@ func loadVectors(t *testing.T) *vectors {
 	if err := json.Unmarshal(data, &v); err != nil {
 		t.Fatalf("parsing %s: %v", vectorsPath, err)
 	}
-	if len(v.ULID) == 0 || len(v.UUIDv7) == 0 || len(v.ULIDMonotonic) == 0 || len(v.Prefixes.Valid) == 0 {
+	if len(v.ULID) == 0 || len(v.UUIDv7) == 0 || len(v.ULIDMonotonic) == 0 || len(v.Prefixes.Valid) == 0 ||
+		len(v.IDs.Valid) == 0 || len(v.IDs.Invalid) == 0 || len(v.IDs.Ordered) == 0 || len(v.IDs.Bounds) == 0 {
 		t.Fatalf("%s is missing a section", vectorsPath)
 	}
 	return &v
@@ -206,6 +231,149 @@ func TestConformancePrefixPairs(t *testing.T) {
 	for _, pair := range v.Prefixes.DistinctPairs {
 		if err := build(pair[0], pair[1]); err != nil {
 			t.Errorf("registering %q then %q: err = %v, want nil", pair[0], pair[1], err)
+		}
+	}
+}
+
+// vectorFormat maps a vector's format name to the Strategy it denotes.
+func vectorFormat(t *testing.T, name string) Strategy {
+	t.Helper()
+	switch name {
+	case "ulid":
+		return ULID
+	case "uuidv7":
+		return UUIDv7
+	}
+	t.Fatalf("unknown format %q in the vectors", name)
+	return 0
+}
+
+func TestConformanceIDsValid(t *testing.T) {
+	for _, v := range loadVectors(t).IDs.Valid {
+		id, err := Parse(v.ID)
+		if err != nil {
+			t.Errorf("Parse(%q) = %v, want nil", v.ID, err)
+			continue
+		}
+		if id.String() != v.ID || id.Prefix() != v.Prefix || id.ValuePart() != v.Value {
+			t.Errorf("Parse(%q) = %q, prefix %q, value %q", v.ID, id, id.Prefix(), id.ValuePart())
+		}
+		if want := vectorFormat(t, v.Format); id.Strategy() != want {
+			t.Errorf("Parse(%q) format = %v, want %v", v.ID, id.Strategy(), want)
+		}
+		if id.UnixMilli() != v.TimestampMs {
+			t.Errorf("Parse(%q) timestamp = %d, want %d", v.ID, id.UnixMilli(), v.TimestampMs)
+		}
+		if want := time.UnixMilli(v.TimestampMs).UTC(); !id.Time().Equal(want) || id.Time().Location() != time.UTC {
+			t.Errorf("Parse(%q) time = %v, want %v in UTC", v.ID, id.Time(), want)
+		}
+		if !IsValid(v.ID) || !IsValidPrefixed(v.ID, v.Prefix) {
+			t.Errorf("IsValid(%q) = false", v.ID)
+		}
+		if _, err := ParsePrefixed(v.ID, v.Prefix); err != nil {
+			t.Errorf("ParsePrefixed(%q, %q) = %v, want nil", v.ID, v.Prefix, err)
+		}
+	}
+}
+
+func TestConformanceIDsInvalid(t *testing.T) {
+	for _, v := range loadVectors(t).IDs.Invalid {
+		var err error
+		var valid bool
+		if v.ExpectedPrefix != nil {
+			_, err = ParsePrefixed(v.ID, *v.ExpectedPrefix)
+			valid = IsValidPrefixed(v.ID, *v.ExpectedPrefix)
+		} else {
+			_, err = Parse(v.ID)
+			valid = IsValid(v.ID)
+		}
+		if valid {
+			t.Errorf("%q: the validity check returned true", v.ID)
+		}
+		var invalid *InvalidIDError
+		if !errors.As(err, &invalid) {
+			t.Errorf("parsing %q: err = %v, want *InvalidIDError", v.ID, err)
+			continue
+		}
+		if !errors.Is(err, ErrInvalidID) {
+			t.Errorf("parsing %q: the error does not match ErrInvalidID", v.ID)
+		}
+		if invalid.Reason.String() != v.Reason {
+			t.Errorf("parsing %q: reason = %s, want %s", v.ID, invalid.Reason, v.Reason)
+		}
+		if invalid.Text != v.ID {
+			t.Errorf("parsing %q: the error carries the text %q", v.ID, invalid.Text)
+		}
+		if got := errors.Is(err, ErrInvalidPrefix); got != (invalid.Reason == ReasonPrefix) {
+			t.Errorf("parsing %q: errors.Is(err, ErrInvalidPrefix) = %v for reason %s", v.ID, got, invalid.Reason)
+		}
+		if invalid.Reason == ReasonPrefixMismatch && invalid.ExpectedPrefix != *v.ExpectedPrefix {
+			t.Errorf("parsing %q: expected prefix = %q, want %q", v.ID, invalid.ExpectedPrefix, *v.ExpectedPrefix)
+		}
+	}
+}
+
+func TestConformanceIDsOrdered(t *testing.T) {
+	want := loadVectors(t).IDs.Ordered
+	ids := make([]ID, len(want))
+	for i, s := range want {
+		ids[i] = MustParse(s)
+	}
+	text := func(ids []ID) []string {
+		out := make([]string, len(ids))
+		for i, id := range ids {
+			out[i] = id.String()
+		}
+		return out
+	}
+	for i := 1; i < len(ids); i++ {
+		if !ids[i-1].Before(ids[i]) || !ids[i].After(ids[i-1]) || ids[i].Compare(ids[i-1]) != 1 {
+			t.Errorf("%s does not sort strictly before %s", ids[i-1], ids[i])
+		}
+	}
+	// The reversed list, plus a fixed set of shuffles so a failure reproduces.
+	r := rand.New(rand.NewPCG(1, 2))
+	for n := range 200 {
+		shuffled := slices.Clone(ids)
+		if n == 0 {
+			slices.Reverse(shuffled)
+		} else {
+			r.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+		}
+		slices.SortFunc(shuffled, ID.Compare)
+		if got := text(shuffled); !slices.Equal(got, want) {
+			t.Fatalf("sorting a permutation gave %v, want %v", got, want)
+		}
+	}
+}
+
+func TestConformanceIDsBounds(t *testing.T) {
+	for _, v := range loadVectors(t).IDs.Bounds {
+		s := vectorFormat(t, v.Format)
+		at := time.UnixMilli(v.TimestampMs)
+		lower, err := LowerBoundValue(at, s)
+		if err != nil || lower != v.Lower {
+			t.Errorf("LowerBoundValue(%d, %v) = %q, %v; want %q", v.TimestampMs, s, lower, err, v.Lower)
+		}
+		upper, err := UpperBoundValue(at, s)
+		if err != nil || upper != v.Upper {
+			t.Errorf("UpperBoundValue(%d, %v) = %q, %v; want %q", v.TimestampMs, s, upper, err, v.Upper)
+		}
+		// The sub-millisecond part of the instant is dropped.
+		if got, _ := UpperBoundValue(at.Add(999_999*time.Nanosecond), s); got != v.Upper {
+			t.Errorf("UpperBoundValue(%d ms + 999999 ns, %v) = %q, want %q", v.TimestampMs, s, got, v.Upper)
+		}
+		for _, b := range []string{v.Lower, v.Upper} {
+			id, err := LowerBound("usr", at, s)
+			if b == v.Upper {
+				id, err = UpperBound("usr", at, s)
+			}
+			if err != nil || id.String() != "usr_"+b || id.UnixMilli() != v.TimestampMs || id.Strategy() != s {
+				t.Errorf("bound identifier for %d, %v = %q, %v; want usr_%s", v.TimestampMs, s, id, err, b)
+			}
+			if _, err := Parse("usr_" + b); err != nil {
+				t.Errorf("the bound usr_%s does not parse: %v", b, err)
+			}
 		}
 	}
 }

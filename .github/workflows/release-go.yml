@@ -5,11 +5,16 @@ name: Release Idora.Go
 # subdirectory to be tagged with that subdirectory as a prefix, which is why the tag is
 # `Idora.Go/vX.Y.Z` rather than `vX.Y.Z`.
 #
+# The extension modules nested inside Idora.Go are released the same way, each with its own
+# directory as the prefix: `Idora.Go/idoragorm/vX.Y.Z` and `Idora.Go/idorapgx/vX.Y.Z`. They require
+# a released version of the core, so the core's tag must be pushed, and released, first.
+#
 # This workflow verifies the tagged commit, asks the module proxy to index the new version so it
 # is available immediately, and opens a GitHub release.
 on:
   push:
-    tags: ['Idora.Go/v*']
+    # `*` does not match `/` in tag filters, so the extension modules need their own pattern.
+    tags: ['Idora.Go/v*', 'Idora.Go/*/v*']
 
 jobs:
   release:
@@ -21,44 +26,59 @@ jobs:
     env:
       TZ: Australia/Sydney
 
-    defaults:
-      run:
-        working-directory: Idora.Go
-
     steps:
       - uses: actions/checkout@v4
+
+      - name: Determine module and version
+        id: version
+        run: |
+          DIR="${GITHUB_REF_NAME%/*}"         # Idora.Go or Idora.Go/idoragorm
+          VERSION="${GITHUB_REF_NAME##*/}"    # v1.2.3
+          if ! echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$VERSION' is not a valid Go module version (expected e.g. v1.0.0)"
+            exit 1
+          fi
+          if [ ! -f "$DIR/go.mod" ]; then
+            echo "::error::'$DIR' is not a module directory; tag Idora.Go/vX.Y.Z or Idora.Go/<module>/vX.Y.Z"
+            exit 1
+          fi
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "module=github.com/SrKleRAimBot/Idora/$DIR" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: stable
-          cache-dependency-path: Idora.Go/go.mod
-
-      - name: Determine version
-        id: version
-        run: |
-          VERSION="${GITHUB_REF_NAME#Idora.Go/}"
-          if ! echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-            echo "::error::'$VERSION' is not a valid Go module version (expected e.g. v1.0.0)"
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          cache-dependency-path: ${{ steps.version.outputs.dir }}/go.mod
 
       - name: Verify
+        working-directory: ${{ steps.version.outputs.dir }}
         run: |
           test -z "$(gofmt -l .)"
           go vet ./...
           go test -race -count=1 ./...
+
+      - name: Verify against the released core
+        # An extension is tested against the core at this commit in CI. Consumers ignore the
+        # replace directive and get the core version go.mod requires, so drop the replace and test
+        # again: this fails if that version has not been released or does not work.
+        if: steps.version.outputs.dir != 'Idora.Go'
+        working-directory: ${{ steps.version.outputs.dir }}
+        run: |
+          go mod edit -dropreplace=github.com/SrKleRAimBot/Idora/Idora.Go
+          GOFLAGS=-mod=mod go test -count=1 ./...
+          git checkout -- go.mod go.sum
 
       - name: Ask the module proxy to index the release
         working-directory: ${{ runner.temp }}
         run: |
           go mod init proxy-warmup
           GOPROXY=https://proxy.golang.org GOFLAGS=-mod=mod \
-            go list -m "github.com/SrKleRAimBot/Idora/Idora.Go@${{ steps.version.outputs.version }}"
+            go list -m "${{ steps.version.outputs.module }}@${{ steps.version.outputs.version }}"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          name: Idora.Go ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.dir }} ${{ steps.version.outputs.version }}
           generate_release_notes: true

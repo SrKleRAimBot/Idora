@@ -41,12 +41,36 @@
 // Pointer types are keyed by their element type, so Generate[*User] and Generate[User] are the
 // same call.
 //
+// # Reading identifiers
+//
+// Identifiers come back, in a route, a message or a foreign key. [Parse] reads one into an [ID],
+// a small comparable value holding its prefix, value, format and timestamp. Parsing is strict,
+// accepts either format whatever the Generator is configured with, and does not allocate:
+//
+//	id, err := idora.Parse(s)                  // any valid identifier
+//	id, err := idora.ParsePrefixed(s, "usr")   // one with exactly this prefix
+//	id, err := idora.ParseFor[User](gen, s)    // one with User's registered prefix
+//	ok := idora.IsValidFor[User](gen, s)
+//
+// IDs sort chronologically across prefixes and formats with [ID.Compare]
+// (slices.SortFunc(ids, idora.ID.Compare)), report when they were minted with [ID.Time], and
+// encode as text in JSON and as a string column in database/sql. [LowerBound] and [UpperBound]
+// turn a span of time into a range of identifiers a database can answer from its primary key
+// index.
+//
 // # Errors
 //
 // Failures are values. Every error this package returns can be matched with [errors.Is] against
 // one of the sentinels ([ErrInvalidPrefix], [ErrDuplicatePrefix], [ErrPrefixNotRegistered],
-// [ErrPromotedPrefix]) or unpacked with [errors.As] into the matching typed error, which carries
-// the details as fields.
+// [ErrPromotedPrefix], [ErrInvalidID]) or unpacked with [errors.As] into the matching typed
+// error, which carries the details as fields.
+//
+// # Extensions
+//
+// Package [github.com/SrKleRAimBot/Idora/Idora.Go/idorahttp], in this module, validates
+// identifiers in net/http route wildcards. Integrations with third-party libraries are separate
+// modules so that this one stays free of dependencies: idoragorm assigns primary keys and
+// queries time ranges in GORM, and idorapgx registers ID as a PostgreSQL type with pgx.
 //
 // # Concurrency and monotonicity
 //

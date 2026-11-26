@@ -91,7 +91,7 @@ func (g *Generator) GenerateFor(t reflect.Type) (string, error) {
 	if !ok {
 		return "", &PrefixNotRegisteredError{EntityType: entityKey(t)}
 	}
-	return g.compose(prefix), nil
+	return g.compose(prefix).text, nil
 }
 
 // GenerateWithPrefix returns a new identifier with an ad-hoc prefix, for prefixes known only at
@@ -103,7 +103,7 @@ func (g *Generator) GenerateWithPrefix(prefix string) (string, error) {
 	if err := validatePrefix(prefix); err != nil {
 		return "", err
 	}
-	return g.compose(prefix), nil
+	return g.compose(prefix).text, nil
 }
 
 // PrefixOf returns the prefix registered for entity type T, without the trailing separator, or
@@ -144,24 +144,26 @@ func (g *Generator) Registrations() iter.Seq2[reflect.Type, string] {
 }
 
 // compose builds "<prefix>_<value>" in a stack buffer and converts it to a string once, so the
-// returned string is the only allocation.
-func (g *Generator) compose(prefix string) string {
+// returned identifier's text is the only allocation. The ID is assembled from what was encoded,
+// so nothing is parsed back.
+func (g *Generator) compose(prefix string) ID {
 	var buf [maxIDLen]byte
 	n := copy(buf[:], prefix)
 	buf[n] = Separator
 	n++
-	now := nowMillis()
+	ms := nowMillis()
 	if g.strategy == UUIDv7 {
 		var random [uuidV7RandomLen]byte
 		g.drawUUIDv7(&random)
-		encodeUUIDv7(buf[n:], now, &random)
+		encodeUUIDv7(buf[n:], ms, &random)
 		n += uuidV7Len
 	} else {
-		s := g.nextULID(now)
+		s := g.nextULID(ms)
+		ms = s.ms // a stalled or backwards clock keeps the stream's last millisecond
 		encodeULID(buf[n:], s.ms, s.hi, s.lo)
 		n += ulidLen
 	}
-	return string(buf[:n])
+	return ID{text: string(buf[:n]), ms: ms, sep: uint8(len(prefix)), strategy: g.strategy}
 }
 
 // nextULID advances the Generator's ULID stream. The clock is read by the caller, outside the

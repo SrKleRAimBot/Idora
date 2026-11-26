@@ -32,3 +32,35 @@ func TestLookupsDoNotAllocate(t *testing.T) {
 		t.Errorf("PrefixOf allocated %v times", n)
 	}
 }
+
+func TestGenerateIDAllocatesOnlyTheText(t *testing.T) {
+	for _, s := range []idora.Strategy{idora.ULID, idora.UUIDv7} {
+		gen := idora.MustNew(idora.WithStrategy(s), idora.WithEntity[User]("usr"))
+		if n := testing.AllocsPerRun(allocRuns, func() { _, _ = idora.GenerateID[User](gen) }); n != 1 {
+			t.Errorf("%v: GenerateID allocated %v times, want 1", s, n)
+		}
+	}
+}
+
+// Parsing keeps the input string, so reading and comparing identifiers allocates nothing.
+func TestParsingAndComparingDoNotAllocate(t *testing.T) {
+	gen := idora.MustNew(idora.WithEntity[User]("usr"))
+	ulid, uuid := "usr_01k226e0g0008j4ct4ank7f24s", "usr_0198846702007011a233445566778899"
+	a, b := idora.MustParse(ulid), idora.MustParse(uuid)
+	cases := map[string]func(){
+		"Parse ULID":      func() { _, _ = idora.Parse(ulid) },
+		"Parse UUIDv7":    func() { _, _ = idora.Parse(uuid) },
+		"ParsePrefixed":   func() { _, _ = idora.ParsePrefixed(ulid, "usr") },
+		"ParseFor":        func() { _, _ = idora.ParseFor[User](gen, ulid) },
+		"IsValid":         func() { _ = idora.IsValid(ulid) },
+		"IsValidPrefixed": func() { _ = idora.IsValidPrefixed("bad", "usr") },
+		"IsValidFor":      func() { _ = idora.IsValidFor[User](gen, uuid) },
+		"Compare":         func() { _ = a.Compare(b) },
+		"Time":            func() { _ = a.Time() },
+	}
+	for name, fn := range cases {
+		if n := testing.AllocsPerRun(1000, fn); n != 0 {
+			t.Errorf("%s allocated %v times", name, n)
+		}
+	}
+}

@@ -64,7 +64,12 @@ Requires Go 1.23 or later (it uses `iter.Seq2` and `reflect.TypeFor`).
 
 The module lives in a subdirectory of the Idora repository, so Go requires its release tags to
 carry the directory as a prefix: versions are tagged `Idora.Go/vX.Y.Z` (the first is
-`Idora.Go/v1.0.0`), and `go get …@v1.0.0` resolves to that tag.
+`Idora.Go/v1.0.0`), and `go get …@v1.0.0` resolves to that tag. Parsing and comparing identifiers
+(the `ID` type) arrived in `v1.1.0`.
+
+Integrations live next to the core. [`idorahttp`](#nethttp-idorahttp) is a stdlib-only package
+inside this module; [`idoragorm`](idoragorm) and [`idorapgx`](idorapgx) are separate modules, so
+their dependencies never reach you unless you import them. See [Extensions](#extensions).
 
 ---
 
@@ -325,15 +330,16 @@ contains a mutex). Share a pointer instead.
 
 ### Reading prefixes back
 
-Sometimes you need the prefix itself rather than a whole identifier, for example to check that an
-identifier belongs to the entity a route expects:
+Sometimes you need the prefix itself rather than a whole identifier, for example to build a
+range query or a log filter:
 
 ```go
-func isOrderID(gen *idora.Generator, id string) bool {
-    prefix, err := idora.PrefixOf[Order](gen)
-    return err == nil && strings.HasPrefix(id, prefix+"_")
-}
+prefix, err := idora.PrefixOf[Order](gen) // "ord", nil
 ```
+
+To check that an identifier belongs to an entity, don't compare prefixes by hand: use
+`idora.IsValidFor[Order](gen, s)` or `idora.ParseFor[Order](gen, s)`, which also check the value
+(see [Reading identifiers back](#reading-identifiers-back)).
 
 | Function | Returns |
 | --- | --- |
@@ -346,6 +352,140 @@ Returned prefixes never include the trailing separator. `Registrations` yields i
 order: option order, and within one `WithEntities` call, name order. The registry is immutable,
 so every iteration yields the same sequence. Use `maps.Collect(gen.Registrations())` when you'd
 rather have a map.
+
+### Generating a parsed `ID`
+
+```go
+func GenerateID[T any](g *Generator) (ID, error)
+func MustGenerateID[T any](g *Generator) ID
+func (g *Generator) GenerateIDFor(t reflect.Type) (ID, error)
+```
+
+These are the same calls returning an [`ID`](#reading-identifiers-back) instead of a string, for
+code that keeps identifiers as `ID` values. They cost the same, one allocation, and nothing is
+parsed back: the `ID` is assembled from what was just encoded.
+
+---
+
+## Reading identifiers back
+
+Generation is half of the job. Identifiers come back in a route, a message or a foreign key, and
+need checking, reading and putting in order. `idora.Parse` turns one into an `idora.ID`:
+
+```go
+id, err := idora.Parse("usr_01k226e0g0008j4ct4ank7f24s")
+
+id.Prefix()    // "usr"
+id.ValuePart() // "01k226e0g0008j4ct4ank7f24s"
+id.Strategy()  // idora.ULID
+id.UnixMilli() // 1754568000000
+id.Time()      // 2025-08-07 12:00:00 +0000 UTC
+id.String()    // "usr_01k226e0g0008j4ct4ank7f24s", exactly the input
+```
+
+Any conforming identifier parses, in either format, whatever strategy your generator uses and
+whichever Idora package minted it. The value part is called `ValuePart` because `Value` is the
+`driver.Valuer` method `database/sql` needs.
+
+### Parsing
+
+| Function | Returns |
+| --- | --- |
+| `idora.Parse(s)` | `(ID, error)` for any valid identifier |
+| `idora.ParsePrefixed(s, "usr")` | the same, and the prefix must be exactly `usr` |
+| `idora.ParseFor[User](gen, s)` | the same, with `User`'s registered prefix |
+| `gen.ParseFor(reflect.Type, s)` | the same, for a run-time type |
+| `idora.MustParse(s)` | an `ID`, panicking instead; for constants in tests |
+| `idora.IsValid(s)`, `idora.IsValidPrefixed(s, p)` | `bool` |
+| `idora.IsValidFor[User](gen, s)`, `gen.IsValidFor(t, s)` | `bool` |
+
+Parsing is **strict**. It accepts exactly what a conforming generator emits: no trimming, no case
+folding, no hyphens. The checks run in a fixed order and the first failure is reported as an
+`*InvalidIDError` whose `Reason` says which:
+
+1. `ReasonNoSeparator`: there's no `_` at all.
+2. `ReasonPrefix`: the text before the first `_` isn't a valid prefix. The error wraps the
+   `*InvalidPrefixError` as `Cause`, so `errors.Is(err, idora.ErrInvalidPrefix)` is true too.
+3. `ReasonValue`: the rest is neither a ULID (26 lowercase Crockford characters, the first at most
+   `7`) nor a UUIDv7 (32 lowercase hex digits with the version `7` and the RFC 9562 variant).
+4. `ReasonPrefixMismatch`: only when you asked for a prefix, and it isn't **exactly** that one.
+   `USR_…` doesn't match `usr`.
+
+`ParseFor` and `IsValidFor` fail differently for a type you never registered: `ParseFor` returns a
+`*PrefixNotRegisteredError` (the identifier isn't at fault, so it isn't an `*InvalidIDError`), and
+`IsValidFor`, which can only return a bool, panics with it, like `MustGenerate`. Answering `false`
+would make every identifier look invalid and hide the real mistake.
+
+`Parse` keeps the string you pass rather than copying it, so parsing doesn't allocate and costs
+about 15 ns (see [Performance](#performance)).
+
+### Equality and ordering
+
+`ID` is a comparable value. Use `==` (or `Equal`), and use it as a map key: two IDs are equal
+exactly when their texts are.
+
+Its **natural order** is chronological: by timestamp, then by value, then by prefix. That means
+identifiers of different entity types and formats interleave in the order they were made. An order
+created after a user sorts after that user, although `ord` < `usr`:
+
+```go
+slices.SortFunc(ids, idora.ID.Compare)
+```
+
+| Method | Meaning |
+| --- | --- |
+| `Compare(other)` | -1, 0, +1 in the natural order; 0 only when equal |
+| `Before(other)`, `After(other)` | strict in the natural order |
+| `CompareTime(other)` | the millisecond only: 0 for two minted in the same millisecond |
+| `SameMillisecond(other)` | the same, as a bool |
+| `CreatedBefore(t)`, `CreatedAfter(t)` | strict, after dropping `t`'s sub-millisecond part |
+| `HasPrefix(p)` | exact and case-sensitive |
+
+Sorting the strings themselves gives a different order, grouped by prefix first. That's the order
+a database index on the column holds, and the one [range bounds](#range-queries) rely on.
+
+### JSON, `database/sql` and the zero ID
+
+`ID` implements `encoding.TextMarshaler` and `TextUnmarshaler`, so it's a plain string in JSON,
+XML and map keys, and an invalid identifier in a request body fails `json.Unmarshal` with an
+`*InvalidIDError`:
+
+```go
+type Order struct {
+    ID       idora.ID `json:"id"`
+    Customer idora.ID `json:"customer"`
+}
+```
+
+It also implements `sql.Scanner` and `driver.Valuer`, so it works as a column, a query argument
+and a scan destination with any driver. Store it in a text column (see
+[Sizing your database column](#sizing-your-database-column)).
+
+The zero `ID` holds no identifier: `IsZero()` reports it, it's empty text in JSON (and `null`
+decodes to it), and it's `NULL` in SQL, so an optional identifier needs no pointer. Empty text
+decodes to the zero `ID` rather than failing, so that it round-trips; `Parse("")` still fails, and
+`IsZero()` after decoding tells you a required identifier was missing.
+
+### Range queries
+
+A value starts with its timestamp, so the identifiers minted for one prefix during a span of time
+are a contiguous range of strings. `LowerBound` and `UpperBound` give you its ends:
+
+```go
+lo, err := idora.LowerBound("usr", from, idora.ULID) // usr_01k226e0g00000000000000000
+hi, err := idora.UpperBound("usr", to, idora.ULID)   // usr_01k229vw40zzzzzzzzzzzzzzzz
+
+rows, err := db.QueryContext(ctx, `SELECT … FROM users WHERE id >= $1 AND id <= $2`, lo, hi)
+```
+
+That selects every user created in `[from, to]`, to the millisecond, straight from the primary key
+index: no `created_at` column, no secondary index, no parsing. `LowerBoundValue` and
+`UpperBoundValue` return the value alone. The bounds are themselves valid identifiers.
+
+They compare correctly only against identifiers with the **same prefix and format**, as plain
+strings, which is exactly what a column holding one entity type contains. A time before 1970 or
+after the year 10889 is outside what a 48-bit timestamp holds, and is an error rather than a
+silently clamped bound.
 
 ---
 
@@ -373,6 +513,8 @@ so the split is unambiguous:
 prefix, value, ok := strings.Cut(id, "_") // "usr", "01k2f9v8ta7m3x0qbrn4dzeh5c", true
 ```
 
+That's all the format needs, but `idora.Parse` also checks both halves and reads the timestamp.
+
 ### Sizing your database column
 
 | | ULID | UUIDv7 |
@@ -397,8 +539,10 @@ prefix: it's a property of the type, so you already know it from the column you'
 
 ## Errors
 
-Failures are values. Every error the package returns matches exactly one sentinel under
-`errors.Is`, and unpacks with `errors.As` into a typed error that carries the details as fields.
+Failures are values. Every error the package returns matches a sentinel under `errors.Is`, and
+unpacks with `errors.As` into a typed error that carries the details as fields. Each matches
+exactly one sentinel, except that an `*InvalidIDError` caused by a bad prefix also matches
+`ErrInvalidPrefix`, through the `*InvalidPrefixError` it wraps.
 Messages start with `idora:`, are lower-case with no trailing punctuation, and say how to fix the
 problem.
 
@@ -408,11 +552,17 @@ problem.
 | `ErrDuplicatePrefix` | `*DuplicatePrefixError` (`Prefix`, `ExistingPrefix`, `EntityType`, `ConflictingEntityType`) | Two entity types register the same prefix (ignoring case), or one type is registered twice, whether by two `WithEntity` options, one of each style, or the same type listed twice | `New` | Give each type its own prefix, and register it exactly once |
 | `ErrPrefixNotRegistered` | `*PrefixNotRegisteredError` (`EntityType`) | `Generate`, `PrefixOf` and friends are asked about a type with no prefix | The call | Register the type, or use `GenerateWithPrefix` |
 | `ErrPromotedPrefix` | `*PromotedPrefixError` (`EntityType`, `Field`) | A type given to `WithEntities` only has `IDPrefix` through an embedded field | `New` | Declare `IDPrefix` on the type itself, or use `WithEntity` |
+| `ErrInvalidID` | `*InvalidIDError` (`Text`, `Reason`, `ExpectedPrefix`, `Cause`) | Text isn't a valid identifier, or doesn't have the prefix asked for | `Parse` and friends, `UnmarshalText`, `Scan` | Usually nothing: the input is bad, so reject it (400 or 404) |
 
 The first two and the last one are start-up failures by design. A duplicate prefix defeats the
 whole point: you could no longer tell from `acc_01k2f9…` whether you were looking at an `Account`
 or an `Accrual`, so the process refuses to start rather than let that through. Prefixes are
 compared **ignoring ASCII case**, so `usr` and `USR` count as a collision.
+
+`InvalidIDError.Reason` is one of `ReasonNoSeparator`, `ReasonPrefix`, `ReasonValue` or
+`ReasonPrefixMismatch`; `ExpectedPrefix` is set for the last and `Cause` for `ReasonPrefix`. Its
+message says what's wrong with the text and quotes at most 64 bytes of it, so a megabyte of
+garbage in a request doesn't become a megabyte of log line. `Text` keeps the whole input.
 
 `InvalidPrefixError.Reason` is one of `ReasonEmpty`, `ReasonTooLong`, `ReasonSeparator` or
 `ReasonCharacter`. For the last two, `Index` and `Char` locate the offending character. When the
@@ -442,8 +592,13 @@ if errors.As(err, &dup) {
 }
 ```
 
-Two more failures are plain errors, because they're arguments no correct program passes: an
-undefined `Strategy` value and a nil `reflect.Type` or nil `Entity`. Both are reported by `New`.
+A few more failures are plain errors, because they're arguments no correct program passes: an
+undefined `Strategy` value and a nil `reflect.Type` or nil `Entity`, reported by `New`, and a time
+outside the 48-bit timestamp range, reported by `LowerBound` and its relatives.
+
+`ValidatePrefix(p)` applies the prefix rules on their own, returning nil or an
+`*InvalidPrefixError` without allocating, for code that accepts a prefix itself and wants to
+reject a bad one early.
 
 ---
 
@@ -464,6 +619,14 @@ hand-rolled Go UUIDs do.
 | **`GenerateWithPrefix`, ULID** | **48.5** | **0.22** | **32** | **1** |
 | **`Generate[T]`, UUIDv7** | **77.0** | **0.34** | **48** | **1** |
 | **`GenerateWithPrefix`, UUIDv7** | **66.5** | **0.30** | **48** | **1** |
+
+Reading an identifier back costs no allocation at all, because the `ID` keeps the string it was
+given:
+
+| Benchmark | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| `Parse`, ULID | 15.2 | 0 | 0 |
+| `Parse`, UUIDv7 | 18.8 | 0 | 0 |
 
 The parallel variants share one generator across 14 goroutines with `b.RunParallel`. Their ns/op
 is wall-clock time divided by the total number of operations, so lower means more throughput:
@@ -581,10 +744,11 @@ From Go 1.24 it can't: `crypto/rand.Read` crashes the program rather than return
 predictable identifiers would be worse.
 
 **Can I use these as primary keys with `database/sql`, GORM, sqlc or ent?**
-Yes, they're ordinary strings. Assign one when you construct the entity, or in a `BeforeCreate`
-hook, rather than letting the database generate the key. Because the values are time-ordered,
-B-tree inserts stay at the end of the index. That's exactly the behaviour you want, and it's the
-reason not to use a random UUID.
+Yes. They're ordinary strings, and `idora.ID` is a `Scanner` and `Valuer` for when you'd rather
+keep them parsed. Assign one when you construct the entity, or let
+[`idoragorm`](idoragorm) do it on create, rather than letting the database generate the key.
+Because the values are time-ordered, B-tree inserts stay at the end of the index. That's exactly
+the behaviour you want, and it's the reason not to use a random UUID.
 
 **Are identifiers case-sensitive?**
 Yes. Compare them with `==`. Generated values are always lowercase, and neither alphabet contains
@@ -613,6 +777,12 @@ error is there to catch. If you need a different prefix, change the method. Note
 `WithEntity` alone is fine on a type that has an `IDPrefix` method: the method is only consulted
 when you pass the type to `WithEntities`.
 
+**Should I store strings or `idora.ID` values in my structs?**
+Either. A string is simplest and is what the generate functions return. An `ID` has been checked
+already, so a value that made it into the struct is known to be valid, and it carries its
+timestamp, so sorting and time comparisons need no further parsing. It costs 32 bytes instead of
+16 and converts to and from JSON and SQL by itself.
+
 ### How promoted methods are detected
 
 Go compiles every promoted method into a small wrapper function, and the runtime reports that
@@ -632,6 +802,81 @@ silently. The test suite covers generic types too, and detection behaves the sam
 
 ---
 
+## Extensions
+
+The core module has no dependencies, and it keeps that promise by putting integrations with
+third-party libraries in **separate modules** nested in this directory. You only download GORM if
+you import `idoragorm`.
+
+| Package | Module | What it does |
+| --- | --- | --- |
+| [`idorahttp`](idorahttp) | this one (stdlib only) | parse and enforce identifiers in `net/http` route wildcards |
+| [`idoragorm`](idoragorm) | `github.com/SrKleRAimBot/Idora/Idora.Go/idoragorm` | assign primary keys on create, and query by creation time, in GORM |
+| [`idorapgx`](idorapgx) | `github.com/SrKleRAimBot/Idora/Idora.Go/idorapgx` | store UUIDv7 identifiers in native PostgreSQL `uuid` columns with pgx v5 |
+
+### `net/http`: `idorahttp`
+
+Go 1.22's `ServeMux` matches wildcards like `{id}`. `idorahttp` parses them strictly, in the
+handler or in middleware that rejects a malformed identifier before your handler runs:
+
+```go
+import "github.com/SrKleRAimBot/Idora/Idora.Go/idorahttp"
+
+mux.Handle("GET /users/{id}", idorahttp.RequireFor[User](gen, "id")(showUser))
+
+func showUser(w http.ResponseWriter, r *http.Request) {
+    id, _ := idorahttp.FromContext(r.Context(), "id") // parsed, and known to be a usr_ identifier
+    …
+}
+```
+
+| Function | Does |
+| --- | --- |
+| `idorahttp.PathID(r, "id", "usr")` | parses `r.PathValue("id")` with `ParsePrefixed` |
+| `idorahttp.PathIDFor[User](r, gen, "id")` | the same, with `User`'s registered prefix |
+| `idorahttp.Require("id", "usr", opts...)` | middleware: 400 for a bad identifier, otherwise stores it in the context |
+| `idorahttp.RequireFor[User](gen, "id", opts...)` | the same, with `User`'s registered prefix |
+| `idorahttp.FromContext(ctx, "id")` | `(idora.ID, bool)`, the identifier the middleware stored |
+| `idorahttp.NewContext(ctx, "id", id)` | stores one yourself, for testing handlers |
+
+`WithStatus(http.StatusNotFound)` answers a malformed identifier the way an unknown one is
+answered, which suits public routes, and `WithErrorHandler` replaces the response entirely, for
+example with a JSON problem document. Stack the middleware for routes with several wildcards
+(`/users/{user}/orders/{order}`); each identifier is stored under its own name.
+
+`ServeMux` sets path values as it dispatches, so wrap the handler you register a pattern with,
+not the mux. Mistakes in the program are caught early: `Require` with an invalid prefix and
+`RequireFor` with an unregistered type panic while you set up routes, and middleware asked for a
+wildcard the pattern doesn't have answers 500 rather than blaming the client.
+
+### GORM: `idoragorm`
+
+```go
+db.Use(idoragorm.New(gen))
+
+u := User{Name: "Ada"}
+db.Create(&u) // u.ID == "usr_01k2f9v8ta7m3x0qbrn4dzeh5c"
+
+db.Scopes(idoragorm.CreatedBetweenFor[User](gen, "", from, to)).Find(&users)
+```
+
+The plugin fills empty string or `idora.ID` primary keys on create, including batches,
+associations and `Save`, for models registered with the generator or declaring `IDPrefix`. The
+scope turns a time span into a primary key range. See [its README](idoragorm/README.md).
+
+### pgx: `idorapgx`
+
+```go
+conn.Exec(ctx, `INSERT INTO invoices (id) VALUES ($1)`, idorapgx.UUID(id))
+conn.QueryRow(ctx, `SELECT id FROM invoices WHERE …`).Scan(idorapgx.ScanUUIDFor[Invoice](gen, &id))
+```
+
+Stores a UUIDv7 identifier's 16 bytes in a `uuid` column, without the prefix, and puts the prefix
+back when scanning. An `idora.ID` in a text column needs nothing extra with pgx. See
+[its README](idorapgx/README.md).
+
+---
+
 ## Contributing
 
 From this directory:
@@ -642,7 +887,15 @@ go vet ./...
 go test -race ./...                            # the full suite, including the shared conformance vectors
 TZ=Australia/Sydney go test -run 'UTC|Zone' ./...
 go test -run '^$' -bench . -benchmem ./...     # the performance table above
+
+(cd idoragorm && go vet ./... && go test -race ./...)   # each extension module on its own
+(cd idorapgx && go vet ./... && go test -race ./...)
 ```
+
+`./...` in this directory covers the core and `idorahttp`, and stops at the nested modules, which
+have their own `go.mod`. Each of those requires the core at its released version and replaces it
+with `../`, so it's built and tested against the core in your checkout. The `idoragorm` tests run
+against a real SQLite database through a pure-Go driver, so they need no cgo and no server.
 
 The suite uses only the standard `testing` package. It covers the success, failure and edge cases
 of every exported identifier, plus the encoders, the monotonic step function, the entropy buffer,
@@ -654,12 +907,22 @@ there, but inside the repository a missing file is a failure.
 ## Releasing
 
 Go modules are released by tag. Because this module is in the `Idora.Go` subdirectory, the tag
-carries that prefix:
+carries that prefix, and each extension module's tag carries its own directory:
 
 ```bash
-git tag Idora.Go/v1.0.0
-git push origin Idora.Go/v1.0.0
+git tag Idora.Go/v1.1.0 && git push origin Idora.Go/v1.1.0       # the core, first
+git tag Idora.Go/idoragorm/v1.1.0 Idora.Go/idorapgx/v1.1.0       # then the extensions
+git push origin Idora.Go/idoragorm/v1.1.0 Idora.Go/idorapgx/v1.1.0
 ```
+
+**The core goes first.** An extension's `go.mod` requires a released core version, and its
+`replace … => ../` directive applies only inside this repository: Go ignores replace directives in
+any module that isn't the main module, so everyone who depends on an extension gets exactly the
+core version it requires, from the module proxy. The release workflow checks this by dropping the
+replace directive and testing the extension again before publishing it, which fails if the
+required core version hasn't been released. The replace directive therefore stays in place; when
+an extension starts relying on something new in the core, release the core and raise the
+extension's `require` to that version in the same change.
 
 pkg.go.dev picks the version up on the first `go get` or proxy request. A published version is
 cached by the Go module proxy forever, so a bad release can be retracted (with a `retract`
