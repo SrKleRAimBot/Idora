@@ -1,3 +1,4 @@
+using System.Globalization;
 using Idora.EntityFrameworkCore.Tests.Support;
 using Microsoft.EntityFrameworkCore;
 using Shouldly;
@@ -214,6 +215,40 @@ public sealed class RangeQueryTests : IDisposable
 
         // Assert
         found.ShouldHaveSingleItem().Id.ShouldBe(ids[1]);
+    }
+
+    [Fact]
+    public void WhereIdBetween_OverLinqToObjects_ComparesOrdinallyWhateverTheCurrentCulture()
+    {
+        // Arrange: one millisecond's identifiers, with random fields c000…, ch00… and cz00…. Ordinally
+        // "ch" sorts between "c0" and "cz"; in Czech "ch" is a single letter after "h", so a
+        // culture-sensitive comparison would put the middle one above the upper bound.
+        string timestamp = IdoraId.LowerBound("ord", First).ToString()[..14];
+        IdoraId lower = IdoraId.Parse(timestamp + "c000000000000000");
+        string middle = timestamp + "ch00000000000000";
+        IdoraId upper = IdoraId.Parse(timestamp + "cz00000000000000");
+        IQueryable<Order> orders = new[] { new Order { Id = middle } }.AsQueryable();
+
+        CultureInfo czech = CultureInfo.GetCultureInfo("cs-CZ");
+        if (string.Compare(middle, upper.ToString(), czech, CompareOptions.None) <= 0)
+        {
+            Assert.Skip("this host's Czech collation does not treat \"ch\" as one letter");
+        }
+
+        CultureInfo original = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = czech;
+        try
+        {
+            // Act
+            List<Order> found = orders.WhereIdBetween(o => o.Id, lower, upper).ToList();
+
+            // Assert
+            found.ShouldHaveSingleItem().Id.ShouldBe(middle);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
     }
 
     [Fact]

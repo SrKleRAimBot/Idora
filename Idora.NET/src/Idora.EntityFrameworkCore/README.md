@@ -194,6 +194,12 @@ example on PostgreSQL:
 builder.Entity<Order>().Property(order => order.Id).UseCollation("C");
 ```
 
+The same methods work on any `IQueryable`, LINQ to Objects included, and there the comparison is
+ordinal whatever the current culture. EF Core's own InMemory provider is the exception: it is an EF
+Core provider, so it gets the `string.Compare` that relational databases translate, and evaluates
+that with the current culture. Test range queries against SQLite instead, as EF Core's own guidance
+recommends.
+
 ---
 
 ## Inheritance

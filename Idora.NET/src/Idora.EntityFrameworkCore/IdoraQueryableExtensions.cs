@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Idora;
+using Microsoft.EntityFrameworkCore.Query;
 
 namespace Microsoft.EntityFrameworkCore;
 
@@ -28,7 +29,8 @@ namespace Microsoft.EntityFrameworkCore;
 /// collation does. A linguistic one may not &#8212; Czech treats <c>ch</c> as one letter,
 /// Lithuanian sorts <c>y</c> before <c>j</c>, and a numeric collation compares runs of digits as
 /// numbers &#8212; and can put a bound on the wrong side of a row, so the query silently misses it.
-/// Give the column a binary collation with <c>UseCollation</c>.
+/// Give the column a binary collation with <c>UseCollation</c>. A query that is not an EF Core
+/// query, LINQ to Objects for instance, is compared ordinally instead, whatever the current culture.
 /// </para>
 /// <para>
 /// The range is meaningful only for identifiers of one prefix and one format, which is the shape of
@@ -47,6 +49,13 @@ public static class IdoraQueryableExtensions
     /// <summary><see cref="string.Compare(string, string)"/>, the comparison EF Core translates.</summary>
     private static readonly MethodInfo StringCompare =
         typeof(string).GetMethod(nameof(string.Compare), [typeof(string), typeof(string)])!;
+
+    /// <summary>
+    /// <see cref="string.CompareOrdinal(string, string)"/>, for a query that runs in memory, where
+    /// <see cref="string.Compare(string, string)"/> would use the current culture.
+    /// </summary>
+    private static readonly MethodInfo StringCompareOrdinal =
+        typeof(string).GetMethod(nameof(string.CompareOrdinal), [typeof(string), typeof(string)])!;
 
     /// <summary>
     /// Keeps the rows whose identifier, with <paramref name="prefix"/>, was minted between
@@ -117,10 +126,15 @@ public static class IdoraQueryableExtensions
         Expression column = idSelector.Body;
         Expression zero = Expression.Constant(0);
 
-        // id >= lower && id <= upper, as string.Compare(id, bound) against zero.
+        // id >= lower && id <= upper, as a comparison of id with each bound against zero. An EF Core
+        // query gets string.Compare, which it translates to SQL operators so the database compares
+        // with the column's collation. Anything else, LINQ to Objects included, runs the comparison
+        // itself, where string.Compare would use the current culture (in Czech "ch" is one letter, so
+        // a row can fall outside a range it is ordinally inside), so it gets the ordinal comparison.
+        MethodInfo compare = source.Provider is IAsyncQueryProvider ? StringCompare : StringCompareOrdinal;
         Expression predicate = Expression.AndAlso(
-            Expression.GreaterThanOrEqual(Expression.Call(StringCompare, column, TextParameter(lower)), zero),
-            Expression.LessThanOrEqual(Expression.Call(StringCompare, column, TextParameter(upper)), zero));
+            Expression.GreaterThanOrEqual(Expression.Call(compare, column, TextParameter(lower)), zero),
+            Expression.LessThanOrEqual(Expression.Call(compare, column, TextParameter(upper)), zero));
 
         return source.Where(Expression.Lambda<Func<TEntity, bool>>(predicate, idSelector.Parameters));
     }
