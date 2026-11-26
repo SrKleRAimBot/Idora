@@ -141,31 +141,64 @@ func (p *Plugin) assign(db *gorm.DB) {
 		}
 	}
 	// db.Model(&User{}).Create(map[string]any{...}) creates from a map, keyed by field or column
-	// name as GORM accepts either. The key is filled under the name already present, else under the
-	// column name, unless it holds a value; an absent, nil or empty one counts as missing, as a
-	// zero struct field does.
+	// name: GORM accepts either, and sends both to the same column, so both are looked at. An
+	// absent, nil or empty entry counts as missing, as a zero struct field does, and is removed, so
+	// that the key GORM sends cannot depend on which of two entries it meets first. A supplied key
+	// is kept; two different ones are an error.
+	aliases := []string{field.DBName}
+	if field.Name != field.DBName {
+		aliases = append(aliases, field.Name)
+	}
 	fillMap := func(row reflect.Value) {
-		if row.Type().Key().Kind() != reflect.String {
+		keyType := row.Type().Key()
+		if keyType.Kind() != reflect.String {
 			return
 		}
-		name := field.DBName
-		for _, candidate := range []string{field.Name, field.DBName} {
-			key := reflect.ValueOf(candidate).Convert(row.Type().Key())
-			if existing := row.MapIndex(key); existing.IsValid() {
-				if !isEmpty(existing) {
-					return
-				}
-				name = candidate
-				break
+		if row.IsNil() {
+			// A nil row in a slice is an empty row to GORM; give it a map to hold the key.
+			if !row.CanSet() {
+				_ = db.AddError(fmt.Errorf("idoragorm: cannot assign a primary key to %s in a nil map; "+
+					"pass an empty map instead", stmt.Schema.ModelType))
+				return
 			}
+			row.Set(reflect.MakeMap(row.Type()))
+		}
+		var supplied []reflect.Value
+		var suppliedNames, emptyNames []string
+		for _, name := range aliases {
+			v := row.MapIndex(reflect.ValueOf(name).Convert(keyType))
+			switch {
+			case !v.IsValid():
+			case isEmpty(v):
+				emptyNames = append(emptyNames, name)
+			default:
+				supplied = append(supplied, v)
+				suppliedNames = append(suppliedNames, name)
+			}
+		}
+		if len(supplied) == 2 && fmt.Sprint(supplied[0].Interface()) != fmt.Sprint(supplied[1].Interface()) {
+			// The values are not quoted: they may be untrusted input of any length.
+			_ = db.AddError(fmt.Errorf("idoragorm: the map for %s gives the primary key twice, as %q and %q, "+
+				"with different values; give it once", stmt.Schema.ModelType, suppliedNames[0], suppliedNames[1]))
+			return
+		}
+		for _, name := range emptyNames {
+			row.SetMapIndex(reflect.ValueOf(name).Convert(keyType), reflect.Value{})
+		}
+		if len(supplied) > 0 {
+			return
 		}
 		value, err := next()
 		if err != nil {
 			_ = db.AddError(err)
 			return
 		}
+		name := field.DBName
+		if len(emptyNames) > 0 {
+			name = emptyNames[0]
+		}
 		if v := reflect.ValueOf(value); v.Type().AssignableTo(row.Type().Elem()) {
-			row.SetMapIndex(reflect.ValueOf(name).Convert(row.Type().Key()), v)
+			row.SetMapIndex(reflect.ValueOf(name).Convert(keyType), v)
 		}
 	}
 

@@ -230,6 +230,49 @@ func TestCreateFromAMapAssignsTheKey(t *testing.T) {
 	}
 }
 
+func TestCreateFromMapsWithANilRowOrTwoNamesForTheKey(t *testing.T) {
+	db := open(t, newGen())
+	supplied := "usr_01k226e0g0008j4ct4ank7f24s"
+
+	// A nil row in a batch is an empty row to GORM, and must not panic.
+	rows := make([]map[string]any, 2)
+	rows[1] = map[string]any{"name": "Ada"}
+	if err := db.Model(&User{}).CreateInBatches(rows, 10).Error; err != nil {
+		t.Fatal(err)
+	}
+	// An empty entry under one name must not override a key supplied under the other.
+	merged := map[string]any{"name": "Grace", "ID": "", "id": supplied}
+	if err := db.Model(&User{}).Create(merged).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, empty := merged["ID"]; empty {
+		t.Errorf("the empty alias was left beside the supplied key: %v", merged)
+	}
+	var grace User
+	if err := db.First(&grace, "name = ?", "Grace").Error; err != nil || grace.ID != supplied {
+		t.Errorf("stored %q, %v; want the supplied %q", grace.ID, err, supplied)
+	}
+	var users []User
+	if err := db.Find(&users).Error; err != nil || len(users) != 3 {
+		t.Fatalf("read back %d users, %v; want 3", len(users), err)
+	}
+	for _, u := range users {
+		if _, err := idora.ParsePrefixed(u.ID, "usr"); err != nil {
+			t.Errorf("%q was stored with key %q: %v", u.Name, u.ID, err)
+		}
+	}
+
+	// Two different keys under the two names are a mistake, reported rather than guessed at.
+	err := db.Model(&User{}).Create(map[string]any{"name": "Edsger", "ID": supplied, "id": "usr_01k226e0g1zzqdvk5vnacrgxv6"}).Error
+	if err == nil || !strings.Contains(err.Error(), "gives the primary key twice") {
+		t.Errorf("conflicting keys: %v", err)
+	}
+	// A nil map passed by value cannot be given a key.
+	if err := db.Model(&User{}).Create(map[string]any(nil)).Error; err == nil || !strings.Contains(err.Error(), "nil map") {
+		t.Errorf("nil map: %v", err)
+	}
+}
+
 func TestCreateAssignsAssociations(t *testing.T) {
 	db := open(t, newGen())
 	u := User{Name: "Ada", Orders: []Order{{Total: 1}, {Total: 2}}}
