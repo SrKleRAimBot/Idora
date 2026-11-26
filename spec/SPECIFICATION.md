@@ -288,14 +288,15 @@ validated as in §5.2.
 Range bounds compare correctly only against identifiers of the **same prefix and format**, as plain
 strings. That is the shape of a database column, which holds one entity type in one format.
 
-"As plain strings" means character by character, with the digits ordered before the lowercase
-letters, as an ordinal (byte) comparison orders them. A binary or `C` collation guarantees that.
-Ordinary linguistic collations agree for these strings too, case- and accent-insensitive ones
-included, because after the shared prefix an identifier holds only ASCII digits and lowercase
-letters. A **numeric** ("natural sort") collation does not: it compares a run of digits as one
-number, so for the millisecond `1` it puts the lower ULID bound `…00000000010000000000000000` after
-the upper bound `…0000000001zzzzzzzzzzzzzzzz`, and the range comes back empty. Packages that build
-range queries **must** document this requirement.
+"As plain strings" means an ordinal comparison: character by character, by code. A binary or `C`
+collation is one, and is what an identifier column should use. Any other collation is correct only
+if it orders the digits and the Crockford alphabet exactly as ordinal comparison does, and many
+linguistic collations do not. Czech and Slovak treat `ch` as one letter, Danish `aa`, Hungarian
+several digraphs; Lithuanian and Latvian sort `y` before `j`, Estonian `z` before `t`. A **numeric**
+("natural sort") collation compares a run of digits as one number, so for the millisecond `1` it
+puts the lower ULID bound `…00000000010000000000000000` after the upper bound
+`…0000000001zzzzzzzzzzzzzzzz`. Each can put a bound on the wrong side of a row, and the range
+silently misses it. Packages that build range queries **must** document this requirement.
 
 ## 7. Errors
 
@@ -310,6 +311,11 @@ apart, sharing a common base where the language has one:
 | invalid identifier | §6.1 fails | the text, the reason (`noSeparator`, `prefix`, `value`, `prefixMismatch`) and, for `prefixMismatch`, the expected prefix |
 
 Messages say what went wrong **and how to fix it**.
+
+*Invalid identifier* was added after the first release, and a package **must not** let it break code
+written against that release. Where the common base is a closed hierarchy that callers may match
+exhaustively — Idora.Java's sealed `IdoraException` — the new error stands beside it instead, as the
+language's ordinary bad-argument type, and the package documents why.
 
 ## 8. Concurrency
 

@@ -26,8 +26,13 @@ import java.util.Optional;
  * <p>The identifier usually comes from outside (a URL, a message, a form field), so treat this as
  * bad input rather than a bug: in a web application it is a {@code 400} or a {@code 404}, not a
  * {@code 500}.
+ *
+ * <p>It is an {@link IllegalArgumentException}, as {@link java.util.UUID#fromString(String)}'s
+ * failure is, and deliberately not an {@link IdoraException}: that hierarchy is sealed, and a
+ * {@code switch} over its three subclasses is documented as exhaustive, so a fourth would break
+ * code written against 1.0.
  */
-public final class InvalidIdException extends IdoraException {
+public final class InvalidIdException extends IllegalArgumentException {
 
     private static final long serialVersionUID = 1L;
 

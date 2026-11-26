@@ -447,10 +447,10 @@ The lower bound is the timestamp characters followed by the smallest random fiel
 for ULID, `7000` `8000` `000000000000` for UUIDv7), the upper bound by the largest (`zzzzzzzzzzzzzzzz`,
 `7fff` `bfff` `ffffffffffff`). Both are themselves valid identifiers. They compare correctly against
 identifiers of the **same prefix and format** as plain strings, which is the shape of a database
-column holding one entity type. The column's collation must order the digits before the lowercase
-letters character by character: binary and ordinary linguistic collations do, but a numeric
-("natural sort") collation does not, and returns nothing for the range; a binary or `C` collation
-is the safe choice for any identifier column. An
+column holding one entity type. Give that column a binary or `C` collation: a linguistic one is
+safe only if it orders the identifier's characters exactly as a byte comparison does, and many do
+not (Czech and Slovak treat `ch` as one letter, Lithuanian sorts `y` before `j`, and a numeric
+collation compares runs of digits as numbers), which can put a bound on the wrong side of a row. An
 instant before 1970 or after the year 10889 (the 48-bit limit) throws `IllegalArgumentException`.
 
 ### Serialization
@@ -499,15 +499,18 @@ you already know it from the column you are reading.
 
 ## Error handling
 
-Every Idora exception extends `IdoraException`, an unchecked, **sealed** base class, so you can
-catch that one type, or `switch` exhaustively over the four subclasses.
+Misusing the library throws an `IdoraException`, an unchecked, **sealed** base class, so you can
+catch that one type, or `switch` exhaustively over its three subclasses. A text that is not an
+identifier is a different kind of failure — bad input, not misuse — and throws `InvalidIdException`,
+an `IllegalArgumentException`, as a malformed `UUID` does. It stays outside the sealed hierarchy so
+that a `switch` written against 1.0 remains exhaustive.
 
 | Exception | Thrown when | Thrown at | Fix |
 | --- | --- | --- | --- |
 | `InvalidEntityPrefixException` | A prefix is empty, longer than 16 characters, or contains something other than an ASCII letter or digit | Start-up (registration), or on the `generate(String)` call | Use 1-16 letters and digits, no underscore |
 | `DuplicateEntityPrefixException` | One prefix is registered for two types (ignoring ASCII case), or one type is registered twice, by any combination of `registerEntity`, annotations and scans | Start-up | Give each type its own prefix, and register it exactly once |
 | `EntityPrefixNotRegisteredException` | `generate(Class)`, `registry().getPrefix(Class)`, or a registry-aware read (`parseId`, `isIdFor`, `lowerBound`, ...) for a type with no prefix | On the call | Register the type, or use `generate(String)` |
-| `InvalidIdException` | A text given to `IdoraId.parse` or `parseId` is not a conforming identifier, or has a different prefix from the one expected | On the call, usually with input from outside | Treat it as bad input: a `400` or `404`, not a `500` |
+| `InvalidIdException` (an `IllegalArgumentException`, not an `IdoraException`) | A text given to `IdoraId.parse` or `parseId` is not a conforming identifier, or has a different prefix from the one expected | On the call, usually with input from outside | Treat it as bad input: a `400` or `404`, not a `500` |
 
 Outside that hierarchy, as Java convention expects:
 
