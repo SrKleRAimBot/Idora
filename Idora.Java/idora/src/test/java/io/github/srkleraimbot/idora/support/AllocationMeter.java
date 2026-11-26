@@ -30,13 +30,29 @@ public final class AllocationMeter {
     private AllocationMeter() {
     }
 
+    /** Calls made before measuring, enough for the JIT to compile a path taken on every call. */
+    private static final int DEFAULT_WARM_UP = 20_000;
+
     /**
      * Returns the bytes {@code action} allocates per call, as the difference between running it
      * {@code 2n} and {@code n} times. Subtracting cancels any fixed cost inside the window (a JIT
      * compilation, the meter's own boxing) and leaves only what scales with the number of calls.
      */
     public static double bytesPerCall(Supplier<?> action, int iterations) {
-        for (int i = 0; i < 20_000; i++) {
+        return bytesPerCall(action, iterations, DEFAULT_WARM_UP);
+    }
+
+    /**
+     * As {@link #bytesPerCall(Supplier, int)}, after {@code warmUp} unmeasured calls.
+     *
+     * <p>Subtraction cancels a fixed cost, but not code that is still running unoptimised in both
+     * windows. A path taken only on a fraction of calls needs a longer warm-up to be compiled: the
+     * entropy refill runs once per hundred or so identifiers, and until C2 compiles the JDK's DRBG
+     * with escape analysis, each 1 KiB refill allocates about a kilobyte of temporaries rather than
+     * about two hundred bytes.
+     */
+    public static double bytesPerCall(Supplier<?> action, int iterations, int warmUp) {
+        for (int i = 0; i < warmUp; i++) {
             sink = action.get();
         }
         long single = total(action, iterations);
