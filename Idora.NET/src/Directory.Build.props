@@ -1,0 +1,41 @@
+<Project>
+
+  <!-- Everything under the repository-wide props still applies. -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!--
+    Settings shared by every package that ships. Idora.NET and its extension packages are released
+    together from one Idora.NET/v* tag, so the version lives here, once, and the release workflow
+    overrides it for all of them with -p:Version.
+  -->
+  <PropertyGroup Label="Shared package metadata">
+    <Version>1.1.0</Version>
+    <Authors>Jake Seracino</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageProjectUrl>https://github.com/SrKleRAimBot/Idora</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/SrKleRAimBot/Idora</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <Copyright>Copyright (c) 2026 Jake Seracino</Copyright>
+
+    <!-- Source Link (built into the SDK) plus a symbols package, so consumers can step into this code. -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Shared build settings">
+    <AnalysisMode>Recommended</AnalysisMode>
+
+    <!-- Public API: XML docs are part of the deliverable, and a missing one is a build error. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- One icon for the whole family. Each package packs its own README alongside its project. -->
+    <None Include="$(MSBuildThisFileDirectory)Idora/icon.png" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+</Project>

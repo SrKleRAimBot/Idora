@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <RootNamespace>Idora.EntityFrameworkCore</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Version, authors, licence, icon and Source Link come from src/Directory.Build.props. -->
+  <PropertyGroup Label="Package metadata">
+    <IsPackable>true</IsPackable>
+    <PackageId>Idora.NET.EntityFrameworkCore</PackageId>
+    <Description>Entity Framework Core support for Idora.NET's prefixed, time-ordered identifiers such as usr_01k2f9v8ta7m3x0qbrn4dzeh5c. HasIdoraKey configures a key that EF Core fills in on insert with the entity's registered prefix, sized and typed for an ASCII column; UseIdoraIds maps IdoraId properties to string columns; WhereCreatedBetween queries a key column by creation time with two index-friendly string comparisons.</Description>
+    <PackageTags>idora;id;identifier;ulid;uuidv7;prefix;prefixed-id;sortable;time-ordered;entity-framework-core;efcore;value-generator;value-converter</PackageTags>
+    <PackageReleaseNotes>
+      1.1.0 - First release, alongside Idora.NET 1.1.0.
+
+      * HasIdoraKey and HasIdoraValueGenerator: keys generated on insert from IIdoraGenerator, with the
+        prefix registered for the entity type, an exact maximum length and a non-Unicode column.
+      * ApplyIdoraKeys: the same for every registered entity in the model at once.
+      * UseIdoraIds: maps IdoraId-typed properties to string columns, with a value converter and comparer.
+      * WhereCreatedBetween and WhereIdBetween: creation-time range queries over the key column, using
+        IdoraId.LowerBound and UpperBound, that translate to SQL.
+    </PackageReleaseNotes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Idora/Idora.csproj" />
+  </ItemGroup>
+
+</Project>

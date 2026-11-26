@@ -1,9 +1,13 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Idora.AspNetCore/Idora.AspNetCore.csproj" />
+    <Project Path="src/Idora.EntityFrameworkCore/Idora.EntityFrameworkCore.csproj" />
     <Project Path="src/Idora/Idora.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Idora.AspNetCore.Tests/Idora.AspNetCore.Tests.csproj" />
     <Project Path="tests/Idora.Benchmarks/Idora.Benchmarks.csproj" />
+    <Project Path="tests/Idora.EntityFrameworkCore.Tests/Idora.EntityFrameworkCore.Tests.csproj" />
     <Project Path="tests/Idora.Tests/Idora.Tests.csproj" />
     <Project Path="tests/Idora.Tests.Fixtures/Idora.Tests.Fixtures.csproj" />
   </Folder>

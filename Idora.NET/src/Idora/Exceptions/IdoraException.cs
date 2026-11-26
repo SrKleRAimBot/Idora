@@ -6,8 +6,8 @@ namespace Idora;
 /// <remarks>
 /// Catch this type if you want to handle any misuse of the identifier generator uniformly; catch
 /// one of the derived types if you care about the specific problem. The derived types are
-/// <see cref="InvalidEntityPrefixException"/>, <see cref="DuplicateEntityPrefixException"/> and
-/// <see cref="EntityPrefixNotRegisteredException"/>.
+/// <see cref="InvalidEntityPrefixException"/>, <see cref="DuplicateEntityPrefixException"/>,
+/// <see cref="EntityPrefixNotRegisteredException"/> and <see cref="InvalidIdException"/>.
 /// </remarks>
 public abstract class IdoraException : Exception
 {
@@ -25,8 +25,10 @@ public abstract class IdoraException : Exception
 
     /// <summary>Initialises a new instance with the specified message and underlying cause.</summary>
     /// <param name="message">A description of the problem.</param>
-    /// <param name="innerException">The exception that caused this one.</param>
-    protected IdoraException(string message, Exception innerException)
+    /// <param name="innerException">
+    /// The exception that caused this one, or <see langword="null"/> if there was none.
+    /// </param>
+    protected IdoraException(string message, Exception? innerException)
         : base(message, innerException)
     {
     }

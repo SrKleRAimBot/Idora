@@ -1,13 +1,14 @@
 name: Release Idora.NET
 
-# Publishing is driven entirely by tags: `git tag Idora.NET/v1.0.0 && git push origin Idora.NET/v1.0.0`.
-# Each Idora package is released independently, so the tag names the package. The version comes
-# from the tag rather than the csproj, so the published package and the tag can never disagree.
+# Publishing is driven entirely by tags: `git tag Idora.NET/v1.1.0 && git push origin Idora.NET/v1.1.0`.
+# Each Idora language is released independently, so the tag names it. One Idora.NET tag releases
+# every .NET package - Idora.NET and each companion package - at the same version. The version comes
+# from the tag rather than the csproj, so the published packages and the tag can never disagree.
 on:
   push:
     tags: ['Idora.NET/v*']
 
-  # Dry run only. This builds, tests, packs, verifies and uploads the package as a build
+  # Dry run only. This builds, tests, packs, verifies and uploads the packages as a build
   # artifact, but deliberately stops short of publishing: the login, push and release steps
   # are gated on a tag push below.
   #
@@ -89,47 +90,78 @@ jobs:
         run: dotnet test -c Release --no-build --verbosity normal
 
       - name: Pack
+        # Packs the solution: one package, plus its symbols package, for every project that sets
+        # IsPackable. Tests and benchmarks opt out.
         run: |
-          dotnet pack src/Idora/Idora.csproj \
+          dotnet pack \
             -c Release --no-build \
             -p:Version=${{ steps.version.outputs.version }} \
             -o artifacts
 
       - name: Verify package contents
         # Cheap insurance against shipping a package missing its README, icon, or the assembly
-        # or XML documentation for any target framework. Far easier to catch here than after an
-        # irreversible push.
+        # or XML documentation for any target framework, or a companion package that depends on
+        # some other version of Idora.NET. Far easier to catch here than after an irreversible push.
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          PKG="artifacts/Idora.NET.$VERSION.nupkg"
-          test -f "$PKG" || { echo "::error::$PKG was not produced"; exit 1; }
-          test -f "artifacts/Idora.NET.$VERSION.snupkg" \
-            || { echo "::error::symbols package was not produced"; exit 1; }
 
-          # The expected lib/ layout is derived from the csproj rather than hard-coded, so that
-          # adding or removing a target framework cannot leave this check quietly validating a
-          # subset of what actually ships.
-          TFMS=$(sed -n 's/.*<TargetFrameworks>\(.*\)<\/TargetFrameworks>.*/\1/p' \
-            src/Idora/Idora.csproj | tr ';' ' ')
-          test -n "$TFMS" || { echo "::error::could not read TargetFrameworks from the csproj"; exit 1; }
-          echo "Target frameworks: $TFMS"
+          # The packages expected, and each one's layout, are read from the projects through MSBuild
+          # rather than hard-coded, so adding a package or a target framework cannot leave this check
+          # quietly validating a subset of what actually ships.
+          EXPECTED=0
+          for project in src/*/*.csproj; do
+            PACKABLE=$(dotnet msbuild "$project" -getProperty:IsPackable)
+            if [ "$PACKABLE" != "true" ]; then
+              echo "Skipping $project: not packable"
+              continue
+            fi
+            EXPECTED=$((EXPECTED + 1))
 
-          REQUIRED="README.md icon.png"
-          for tfm in $TFMS; do
-            REQUIRED="$REQUIRED lib/$tfm/Idora.dll lib/$tfm/Idora.xml"
+            ID=$(dotnet msbuild "$project" -getProperty:PackageId)
+            ASSEMBLY=$(dotnet msbuild "$project" -getProperty:AssemblyName)
+            TFMS=$(dotnet msbuild "$project" -getProperty:TargetFrameworks | tr ';' ' ')
+            test -n "$ID" && test -n "$ASSEMBLY" && test -n "$TFMS" \
+              || { echo "::error::could not read the package layout from $project"; exit 1; }
+            echo "== $ID ($ASSEMBLY; $TFMS)"
+
+            PKG="artifacts/$ID.$VERSION.nupkg"
+            test -f "$PKG" || { echo "::error::$PKG was not produced"; exit 1; }
+            test -f "artifacts/$ID.$VERSION.snupkg" \
+              || { echo "::error::the symbols package for $ID was not produced"; exit 1; }
+
+            REQUIRED="README.md icon.png $ID.nuspec"
+            for tfm in $TFMS; do
+              REQUIRED="$REQUIRED lib/$tfm/$ASSEMBLY.dll lib/$tfm/$ASSEMBLY.xml"
+            done
+
+            CONTENTS=$(unzip -Z1 "$PKG")
+            echo "$CONTENTS"
+
+            for required in $REQUIRED; do
+              echo "$CONTENTS" | grep -qx "$required" \
+                || { echo "::error::$ID is missing $required"; exit 1; }
+            done
+
+            # Every companion package must depend on exactly the Idora.NET being released with it,
+            # for every target framework, or a consumer could pair it with a mismatched core.
+            if [ "$ID" != "Idora.NET" ]; then
+              NUSPEC=$(unzip -p "$PKG" "$ID.nuspec" | sed -n '/<dependencies>/,/<\/dependencies>/p')
+              TFM_GROUPS=$(echo "$NUSPEC" | grep -c '<group targetFramework=')
+              PINNED=$(echo "$NUSPEC" | grep -c "<dependency id=\"Idora.NET\" version=\"$VERSION\"")
+              test "$TFM_GROUPS" -gt 0 && test "$PINNED" -eq "$TFM_GROUPS" \
+                || { echo "::error::$ID does not depend on Idora.NET $VERSION for every target framework"; exit 1; }
+            fi
+
+            echo "Verified $ID: $REQUIRED"
           done
 
-          CONTENTS=$(unzip -Z1 "$PKG")
-          echo "$CONTENTS"
+          # Nothing may be pushed that was not verified above.
+          PRODUCED=$(find artifacts -maxdepth 1 -name '*.nupkg' | wc -l | tr -d ' ')
+          test "$PRODUCED" -eq "$EXPECTED" \
+            || { echo "::error::expected $EXPECTED packages but found $PRODUCED"; ls artifacts; exit 1; }
+          echo "Verified all $EXPECTED packages"
 
-          for required in $REQUIRED; do
-            echo "$CONTENTS" | grep -qx "$required" \
-              || { echo "::error::package is missing $required"; exit 1; }
-          done
-
-          echo "Verified present: $REQUIRED"
-
-      - name: Upload package as a build artifact
+      - name: Upload packages as a build artifact
         # Kept regardless of whether the push succeeds, so a failed publish can be diagnosed.
         uses: actions/upload-artifact@v4
         with:
@@ -147,7 +179,8 @@ jobs:
           user: SrKleRAimBot
 
       - name: Push to nuget.org
-        # The irreversible step. Reachable only from a v* tag push.
+        # The irreversible step. Reachable only from a v* tag push. Every package was verified above,
+        # and --skip-duplicate lets a re-run finish a release that failed part-way through.
         if: github.event_name == 'push'
         run: |
           dotnet nuget push "artifacts/*.nupkg" \
@@ -171,7 +204,7 @@ jobs:
             echo "### Dry run complete"
             echo
             echo "Version \`${{ steps.version.outputs.version }}\` was built, tested, packed and verified."
-            echo "**Nothing was published.** The package is attached to this run as an artifact."
+            echo "**Nothing was published.** The packages are attached to this run as an artifact."
             echo
-            echo "To publish for real, push a tag: \`git tag Idora.NET/v1.0.0 && git push origin Idora.NET/v1.0.0\`"
+            echo "To publish for real, push a tag: \`git tag Idora.NET/v1.1.0 && git push origin Idora.NET/v1.1.0\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -19,10 +19,22 @@
       consumers alone.
     -->
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+
+    <!--
+      Idora.NET.EntityFrameworkCore. The same rule: EF Core 8 is the lowest release that runs on every
+      target framework, so a .NET 8 application on EF Core 8 is left alone and one on EF Core 9 or 10
+      unifies upwards. The newest 8.0 patch rather than 8.0.0, whose transitive dependencies carry
+      published vulnerabilities that NuGet audit (and so the build) would reject.
+    -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="8.0.34" />
   </ItemGroup>
 
   <ItemGroup Label="Test dependencies">
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
