@@ -71,3 +71,67 @@ export function composeUuidV7(timestampMs: number, random: Uint8Array, offset = 
 export function createUuidV7(timestampMs: number, entropy: EntropyPool = sharedEntropy): string {
   return composeUuidV7(timestampMs, entropy.block, entropy.reserve(UUID_RANDOM_BYTES));
 }
+
+/** Number of leading hexadecimal characters that encode the 48-bit timestamp. */
+export const UUID_TIMESTAMP_LENGTH = 12;
+
+/** Index of the version nibble, which is always `7`. */
+export const UUID_VERSION_INDEX = 12;
+
+/** Index of the nibble holding the variant bits, which is always `8`, `9`, `a` or `b`. */
+export const UUID_VARIANT_INDEX = 16;
+
+/** The value of a lowercase hexadecimal digit's character code, or -1 if it is not one. */
+export function hexDigit(code: number): number {
+  if (code >= 0x30 && code <= 0x39) {
+    return code - 0x30; // 0-9
+  }
+
+  return code >= 0x61 && code <= 0x66 ? code - 0x57 : -1; // a-f
+}
+
+/**
+ * Returns the millisecond timestamp a UUIDv7 value begins with, or -1 if `value` is not exactly a
+ * UUIDv7 as Idora writes one: 32 lowercase hexadecimal characters with no hyphens, the version
+ * nibble `7` and the variant nibble one of `8`, `9`, `a`, `b`.
+ */
+export function readUuidV7Timestamp(value: string): number {
+  if (
+    value.length !== UUID_LENGTH ||
+    value.charCodeAt(UUID_VERSION_INDEX) !== 0x37 || // '7'
+    !isVariantNibble(value.charCodeAt(UUID_VARIANT_INDEX))
+  ) {
+    return -1;
+  }
+
+  let timestampMs = 0;
+  for (let i = 0; i < UUID_LENGTH; i++) {
+    const digit = hexDigit(value.charCodeAt(i));
+    if (digit < 0) {
+      return -1;
+    }
+
+    if (i < UUID_TIMESTAMP_LENGTH) {
+      timestampMs = timestampMs * 16 + digit;
+    }
+  }
+
+  return timestampMs;
+}
+
+/** Whether `code` is `8`, `9`, `a` or `b`: a nibble whose top two bits are the RFC variant `10`. */
+export function isVariantNibble(code: number): boolean {
+  return code === 0x38 || code === 0x39 || code === 0x61 || code === 0x62;
+}
+
+/**
+ * The lowest and highest UUIDv7 any generator can produce in `timestampMs`: the timestamp, the
+ * version and variant bits that are fixed, and every random bit clear or set.
+ */
+export function uuidV7Bounds(timestampMs: number): { readonly lower: string; readonly upper: string } {
+  const timestamp = timestampMs.toString(16).padStart(UUID_TIMESTAMP_LENGTH, '0');
+  return {
+    lower: `${timestamp}70008000000000000000`,
+    upper: `${timestamp}7fffbfffffffffffffff`,
+  };
+}

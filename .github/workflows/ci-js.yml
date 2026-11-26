@@ -39,13 +39,28 @@ jobs:
           cache-dependency-path: Idora.JS/package-lock.json
 
       - name: Install
+        # One install for idora.js and the extension packages in extensions/, which are npm
+        # workspaces of this folder and link to the idora.js being built here.
         run: npm ci
 
       - name: Build
         run: npm run build
 
+      - name: Typecheck
+        run: npm run typecheck
+
       - name: Test
         run: npm test
+
+      - name: Typecheck the extensions
+        # Against the idora.js just built, through the workspace link.
+        run: npm run typecheck --workspaces
+
+      - name: Build the extensions
+        run: npm run build --workspaces
+
+      - name: Test the extensions
+        run: npm test --workspaces
 
       - name: Check the package has no runtime dependencies
         # The zero-dependency promise is part of the package's contract, so it is enforced rather
@@ -61,12 +76,35 @@ jobs:
             }
           '
 
-      - name: Pack
-        run: npm pack
+      - name: Check the extensions depend on idora.js only as a peer
+        # Each extension brings nothing of its own: the library it integrates and idora.js are both
+        # peers, so an application never ends up with two copies of either. They are released in
+        # step with idora.js, so their version and their idora.js range must match its version.
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const core = require("./package.json");
+            let failed = false;
+            for (const dir of fs.readdirSync("extensions")) {
+              const pkg = require(`./extensions/${dir}/package.json`);
+              const fail = (message) => { console.error(`::error::${pkg.name}: ${message}`); failed = true; };
+              for (const field of ["dependencies", "optionalDependencies"]) {
+                if (pkg[field] && Object.keys(pkg[field]).length > 0) fail(`declares ${field}: ${Object.keys(pkg[field]).join(", ")}`);
+              }
+              if (pkg.version !== core.version) fail(`is version ${pkg.version}, but idora.js is ${core.version}`);
+              if (pkg.peerDependencies?.["idora.js"] !== `^${core.version}`) fail(`must have the peer dependency "idora.js": "^${core.version}"`);
+            }
+            if (failed) process.exit(1);
+          '
 
-      - name: Upload package
+      - name: Pack
+        run: |
+          npm pack
+          npm pack --workspaces
+
+      - name: Upload packages
         if: matrix.node == 22
         uses: actions/upload-artifact@v4
         with:
-          name: npm-package
+          name: npm-packages
           path: Idora.JS/*.tgz

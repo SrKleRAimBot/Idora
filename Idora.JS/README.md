@@ -305,11 +305,15 @@ start-up.
 ### Reading prefixes back
 
 `ids.registry` exposes what was registered, for when you need the prefix itself rather than a
-whole identifier — checking that an identifier belongs to the entity a route expects, for instance:
+whole identifier:
 
 ```ts
-const isOrderId = (id: string) => id.startsWith(`${ids.registry.getPrefix(Order)}_`);
+ids.registry.getPrefix(Order); // 'ord'
 ```
+
+To check that an incoming identifier belongs to the entity a route expects, use
+[`ids.isIdFor(Order, id)`](#reading-identifiers-back) rather than comparing prefixes by hand: it
+checks the whole identifier, not just its first few characters.
 
 | Member | Returns |
 | --- | --- |
@@ -317,9 +321,139 @@ const isOrderId = (id: string) => id.startsWith(`${ids.registry.getPrefix(Order)
 | `registry.findPrefix(Class)` | The prefix, or `undefined` |
 | `registry.has(Class)` | Whether the class is registered |
 | `registry.registrations` | A read-only `Map` of every class and its prefix, in registration order |
+| `registry.parse(Class, text)`, `tryParse`, `isIdFor` | The same as [`ids.parse`](#for-a-registered-entity-type) and friends |
 
 The `registrations` view has no mutators at all — not just in its type, but at run time — so the
 registry cannot be changed once built.
+
+---
+
+## Reading identifiers back
+
+Identifiers come back — in a route, a message, a foreign key — and need checking, reading and
+sorting. `IdoraId` does all three without you re-implementing the format:
+
+```ts
+import { IdoraId } from 'idora.js';
+
+const id = IdoraId.parse('usr_01k226e0g0008j4ct4ank7f24s');
+
+id.prefix;      // 'usr'
+id.value;       // '01k226e0g0008j4ct4ank7f24s'
+id.format;      // 'ulid'
+id.timestampMs; // 1754568000000
+id.createdAt;   // 2025-08-07T12:00:00.000Z
+id.text;        // 'usr_01k226e0g0008j4ct4ank7f24s', which is also what String(id) and JSON give
+```
+
+Any identifier any Idora package minted parses, in either format, whatever strategy your own
+generator uses. A parsed identifier is an immutable value; `createdAt` is a fresh `Date` on every
+read, because a `Date` can be changed and an `IdoraId` cannot.
+
+### Parsing
+
+| Method | On a bad identifier |
+| --- | --- |
+| `IdoraId.parse(text, expectedPrefix?)` | Throws `InvalidIdError` |
+| `IdoraId.tryParse(text, expectedPrefix?)` | Returns `undefined` |
+| `IdoraId.isValid(text, expectedPrefix?)` | Returns `false` |
+
+With an `expectedPrefix`, an identifier with any other prefix is rejected too. Prefixes are
+compared **exactly**, case included, so `USR_01k2…` is not a `usr` identifier.
+
+Parsing is **strict**: it accepts exactly the text a generator emits and nothing else. There is no
+trimming, no case folding and no tolerance for UUID hyphens, so `' usr_01k2…'`,
+`'usr_01K226E0G0008J4CT4ANK7F24S'` and `'inv_01988467-0200-7011-a233-445566778899'` are all
+rejected. A value that a lenient parser would quietly normalise is a value that is stored in two
+spellings somewhere, and two spellings of one identifier are two identifiers to an index or a
+`Map`. `tryParse` and `isValid` treat anything that is not a string as invalid; `parse` throws a
+`TypeError` for it.
+
+#### For a registered entity type
+
+The generator knows each entity type's prefix, so it can check an identifier against it:
+
+```ts
+const user = ids.parse(User, request.params.id); // throws unless it is a usr_ identifier
+ids.tryParse(User, request.params.id);           // or undefined
+ids.isIdFor(User, request.params.id);            // or false
+```
+
+Asking about a class that was never registered throws `EntityPrefixNotRegisteredError`, from all
+three — the mistake is in your code, not in the identifier, so it should not read as one.
+
+#### A branded type for checked identifiers
+
+`Id<'usr'>` is a string that has been checked: a well-formed identifier with the prefix `usr`. It
+is an ordinary string at run time, so it costs nothing and serialises as itself, but the type
+checker will not let an unchecked string stand in for it:
+
+```ts
+import { type Id, IdoraId } from 'idora.js';
+
+function loadUser(id: Id<'usr'>) { /* ... */ }
+
+loadUser(request.params.id);                           // compile error: just a string
+if (IdoraId.isValid(request.params.id, 'usr')) {
+  loadUser(request.params.id);                         // fine: narrowed to Id<'usr'>
+}
+loadUser(IdoraId.parse(request.params.id, 'usr').text); // also fine
+```
+
+`isValid` and `isIdFor` are type guards, and the `text` of an `IdoraId<'usr'>` is an `Id<'usr'>`.
+Plain `Id` means a checked identifier with any prefix, which is what `ids.isIdFor(User, …)`
+narrows to: the prefix registered for `User` is only known at run time.
+
+### Ordering and comparing
+
+Parsed identifiers have a natural order that is **chronological**: by timestamp, then by value,
+then by prefix. That puts identifiers of every entity type, in both formats, in the order they were
+made — an order created after a user sorts after that user, although `ord` sorts before `usr` as
+text. For the ULIDs one generator mints, it is exactly generation order.
+
+```ts
+events.sort(IdoraId.compare);      // oldest first; hand it straight to sort
+order.id.isAfter(user.id);         // strictly later in the natural order
+a.equals(b);                       // the same identifier
+['ord_…', 'usr_…'].sort(compareIds); // the same order, for strings you have not parsed
+```
+
+| Member | Answers |
+| --- | --- |
+| `IdoraId.compare(a, b)`, `a.compareTo(b)` | Negative, zero or positive, in the natural order |
+| `a.isBefore(b)`, `a.isAfter(b)` | Strictly before or after, in the natural order |
+| `a.equals(b)` | Whether the texts are identical; there is no other notion of equality |
+| `a.compareTimestamp(b)` | The millisecond only: zero for two minted in the same millisecond |
+| `a.isSameMillisecond(b)` | Whether both were minted in the same millisecond |
+| `a.isCreatedBefore(instant)`, `a.isCreatedAfter(instant)` | Strictly before or after a `Date` or epoch milliseconds, to the millisecond |
+| `a.hasPrefix('usr')` | Whether the prefix is exactly `usr`, case included; narrows the type |
+| `compareIds(a, b)` | `IdoraId.compare` for two strings, parsing both on every call |
+
+`a < b` deliberately does not work: it would compare the texts, which is not the natural order as
+soon as prefixes or formats differ, so converting an `IdoraId` to a number throws a `TypeError`
+pointing you at `compare`. To key a `Map` or `Set` by identifier, use its `text`.
+
+### Querying a span of time
+
+An identifier starts with the time it was minted, so every identifier minted for one entity type
+during one span of time is a contiguous range of strings. The bounds of that range select it
+without parsing a row, and with the primary key's index:
+
+```ts
+const from = ids.lowerBound(User, lastMonday); // the lowest identifier any generator could mint
+const to = ids.upperBound(User, now);          // the highest
+// SELECT * FROM users WHERE id >= $1 AND id <= $2   — with from.text and to.text
+```
+
+`ids.lowerBound` and `ids.upperBound` use the generator's own strategy. For another prefix or
+format there are `IdoraId.lowerBound(prefix, time, format?)` and `IdoraId.upperBound(...)`, and
+`IdoraId.lowerBoundValue(time, format?)` and `upperBoundValue` for a column that stores values
+without their prefix. The bounds are themselves valid identifiers, inclusive at both ends, and
+compare correctly against identifiers of the **same prefix and format** — the shape of a database
+column, which holds one entity type in one format. A time before 1970 or after the year 10889,
+the range a 48-bit timestamp covers, throws a `RangeError`.
+
+The [Drizzle integration](#integrations) wraps this up as `createdBetween(users.id, from, to)`.
 
 ---
 
@@ -364,7 +498,8 @@ care which went wrong.
 | --- | --- | --- | --- |
 | `InvalidEntityPrefixError` | A prefix is empty, longer than 16 characters, or contains something other than an ASCII letter or digit | Construction, or the `generateWithPrefix` call | Use 1–16 letters and digits, no underscore |
 | `DuplicateEntityPrefixError` | The same prefix is registered for two classes, or one class is registered twice — by two pairs, a pair and a decorator, or the same module listed twice | Construction | Give each class its own prefix, and register it exactly once |
-| `EntityPrefixNotRegisteredError` | `generate(Class)` or `registry.getPrefix(Class)` is called for a class with no registered prefix | The call | Register the class, or use `generateWithPrefix` |
+| `EntityPrefixNotRegisteredError` | `generate(Class)`, `registry.getPrefix(Class)` or a registry-aware parse is called for a class with no registered prefix | The call | Register the class, or use `generateWithPrefix` or `IdoraId.parse` with an explicit prefix |
+| `InvalidIdError` | `IdoraId.parse` or `ids.parse` is given text that is not a well-formed identifier, or has the wrong prefix | The call | Validate input with `tryParse` or `isValid` where it may be malformed |
 
 A prefix that is not a string at all — `undefined` from plain JavaScript, say — throws a
 `TypeError`, as any JavaScript API does for an argument of the wrong type.
@@ -381,7 +516,7 @@ and *"contains the character '!' at index 3"* is not much help across two hundre
 Each error carries the details as properties, not just in the message:
 
 ```ts
-import { DuplicateEntityPrefixError, IdoraError, InvalidEntityPrefixError } from 'idora.js';
+import { DuplicateEntityPrefixError, IdoraError, InvalidEntityPrefixError, InvalidIdError } from 'idora.js';
 
 try {
   new Idora({ entities: [[Account, 'acc'], [Accrual, 'acc']] });
@@ -401,7 +536,22 @@ try {
     error.index;  // 4
   }
 }
+
+try {
+  ids.parse(User, 'ord_01k226e0g0008j4ct4ank7f24s');
+} catch (error) {
+  if (error instanceof InvalidIdError) {
+    error.reason;         // 'prefixMismatch'  ('noSeparator' | 'prefix' | 'value' | 'prefixMismatch')
+    error.text;           // 'ord_01k226e0g0008j4ct4ank7f24s'
+    error.expectedPrefix; // 'usr'
+    error.entityType;     // User
+  }
+}
 ```
+
+An `InvalidIdError` for the `prefix` reason carries the `InvalidEntityPrefixError` describing what
+is wrong with the prefix as its standard `cause`. Its message quotes at most the first 64
+characters of the text, since the text is usually somebody else's input.
 
 ---
 
@@ -478,13 +628,10 @@ logs, URLs and support tickets. **Treat them as public.** Authorise every reques
 an identifier as a bearer token or a password-reset secret.
 
 **How do I split an identifier back apart?**
-Split on the first underscore. The prefix contains no underscores, by rule, so this is unambiguous:
-
-```ts
-const separator = id.indexOf('_');
-const prefix = id.slice(0, separator);  // 'usr'
-const value = id.slice(separator + 1);  // '01k2f9v8ta7m3x0qbrn4dzeh5c'
-```
+Parse it: `IdoraId.parse(id)` gives you the `prefix`, the `value` and the time it was minted, and
+checks the identifier on the way — see [Reading identifiers back](#reading-identifiers-back). By
+hand, split on the first underscore; the prefix contains no underscores, by rule, so this is
+unambiguous.
 
 **Does it work with minified or bundled code?**
 Yes. Registration is keyed by the class object itself, never by its name, so minification cannot
@@ -494,7 +641,8 @@ so bundlers drop whatever you do not import.
 **Can I use these as keys in Prisma, Drizzle, TypeORM or MikroORM?**
 Yes — they are ordinary strings. Assign one when you create the entity rather than letting the
 database generate the key. Because the values are time-ordered, B-tree inserts stay at the end of
-the index, which is exactly the behaviour you want and the reason not to use `randomUUID()`.
+the index, which is exactly the behaviour you want and the reason not to use `randomUUID()`. For
+Drizzle and Prisma there are [packages that do the assigning for you](#integrations).
 
 **Are identifiers case-sensitive?**
 Compare them exactly, with `===`. Generated values are always lowercase, and neither alphabet
@@ -519,16 +667,42 @@ need a different prefix, change the decorator.
 
 ---
 
+## Integrations
+
+Separate packages, so that `idora.js` itself stays free of dependencies. Each one is released with
+`idora.js` at the same version and takes both it and the library it integrates as peer
+dependencies, so your application never carries a second copy of either.
+
+| Package | For | What it gives you |
+| --- | --- | --- |
+| [`idora.js-zod`](https://github.com/SrKleRAimBot/Idora/tree/main/Idora.JS/extensions/zod) | Zod 4.1+ | `idoraId({ prefix: 'usr' })`, a schema that checks identifiers with a precise message and outputs `Id<'usr'>`; `parsedIdoraId()`, a codec to and from `IdoraId` |
+| [`idora.js-drizzle`](https://github.com/SrKleRAimBot/Idora/tree/main/Idora.JS/extensions/drizzle) | Drizzle ORM 0.44+ | `idoraPrimaryKey(ids, User)`, a correctly sized key column that fills itself in, for PostgreSQL, MySQL and SQLite; `createdBetween(users.id, from, to)` and friends, filters that use the index |
+| [`idora.js-prisma`](https://github.com/SrKleRAimBot/Idora/tree/main/Idora.JS/extensions/prisma) | Prisma 6 and 7 | `idoraExtension({ ids, models: { user: User } })`, a client extension that fills in a missing `id` on every create |
+
+```bash
+npm install idora.js idora.js-zod zod
+```
+
+---
+
 ## Contributing
 
 From the `Idora.JS` folder:
 
 ```bash
-npm ci               # installs the two dev dependencies: typescript and @types/node
-npm run build        # compiles src/ to dist/, with declarations
-npm test             # compiles and runs the suite with node:test
-npm run bench        # the benchmark above
+npm ci                          # installs the dev dependencies, the extensions' included
+npm run build                   # compiles src/ to dist/, with declarations
+npm test                        # compiles and runs the suite with node:test
+npm run bench                   # the benchmark above
+
+npm run build --workspaces      # the extension packages in extensions/, against the dist/ above
+npm test --workspaces           # and their suites
 ```
+
+The packages in `extensions/` are npm workspaces of this folder, linked to the `idora.js` being
+built here rather than to a published one, so a change to the core and the extensions that use it
+are tested together. None of them is part of the `idora.js` package itself, which still contains
+only `dist/`, this README and the licence.
 
 The suite uses Node.js's built-in test runner and assertion library, so it adds nothing to the
 dependency tree. Tests are written Arrange-Act-Assert and cover the success, failure and edge
@@ -541,8 +715,8 @@ suite with `TZ=Australia/Sydney`, so a local-time bug cannot hide behind a runne
 
 ## Releasing
 
-Pushing an `Idora.JS/v*` tag builds, tests, verifies the package contents and publishes to npm
-with [provenance](https://docs.npmjs.com/generating-provenance-statements), using npm's
+Pushing an `Idora.JS/v*` tag builds, tests, verifies the package contents and publishes
+`idora.js` and every extension package to npm, at the tag's version, with [provenance](https://docs.npmjs.com/generating-provenance-statements), using npm's
 [trusted publishing](https://docs.npmjs.com/trusted-publishers) — the workflow authenticates with a
 short-lived GitHub OIDC token, so there is no long-lived npm token to store or rotate:
 
@@ -551,8 +725,11 @@ git tag Idora.JS/v1.0.0
 git push origin Idora.JS/v1.0.0
 ```
 
-The published version comes from the tag, not from `package.json`. Running the workflow manually
-from the Actions tab is a dry run: everything except the publish.
+The published version comes from the tag, not from `package.json`, and each extension's peer
+dependency on `idora.js` is set to `^` that version, since that is the one it was tested with. A
+version already on npm is skipped, so a release that stopped part-way can be finished by running
+the workflow again. Running it manually from the Actions tab is a dry run: everything except the
+publish.
 
 ## License
 

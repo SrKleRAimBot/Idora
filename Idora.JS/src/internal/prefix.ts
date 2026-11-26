@@ -70,6 +70,25 @@ export function validatePrefix(prefix: unknown, parameterName: string): asserts 
 }
 
 /**
+ * Whether `prefix` is a valid entity prefix, without saying why not. The cheap check parsing runs
+ * on untrusted text, so that rejecting garbage costs no more than accepting a good identifier; the
+ * reason is worked out by {@link validatePrefix} only when somebody asks for it.
+ */
+export function isValidPrefix(prefix: string): boolean {
+  if (prefix.length === 0 || prefix.length > MAX_PREFIX_LENGTH) {
+    return false;
+  }
+
+  for (let i = 0; i < prefix.length; i++) {
+    if (!isAsciiLetterOrDigit(prefix.charCodeAt(i))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
  * Folds ASCII letters to lowercase and leaves everything else alone — which, for a validated
  * prefix, is everything else. Used to detect collisions between prefixes that differ only in case.
  *
@@ -94,9 +113,10 @@ function isAsciiLetterOrDigit(code: number): boolean {
   );
 }
 
-function describe(value: unknown): string {
-  if (value === null) {
-    return 'null';
+/** Describes a value of the wrong type for a TypeError message. */
+export function describe(value: unknown): string {
+  if (value === null || value === undefined) {
+    return String(value);
   }
 
   return typeof value === 'object' || typeof value === 'function' ? `a ${typeof value}` : `${typeof value} ${String(value)}`;

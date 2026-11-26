@@ -26,6 +26,67 @@ const RANDOM_DIGITS = 16;
 /** The alphabet as character codes, so a digit becomes a character with one array read. */
 const ALPHABET_CODES = Uint8Array.from(CROCKFORD_ALPHABET, (character) => character.charCodeAt(0));
 
+/** Number of characters after the timestamp: the 80-bit random field. */
+export const ULID_RANDOM_LENGTH = 16;
+
+/**
+ * The value of each lowercase Crockford digit, indexed by character code, and -1 for every other
+ * ASCII character. Uppercase is deliberately absent: Idora emits lowercase, and parsing accepts
+ * exactly what it emits.
+ */
+const DIGIT_VALUES = (() => {
+  const values = new Int8Array(128).fill(-1);
+  for (let digit = 0; digit < CROCKFORD_ALPHABET.length; digit++) {
+    values[CROCKFORD_ALPHABET.charCodeAt(digit)] = digit;
+  }
+
+  return values;
+})();
+
+/** The value of the Crockford digit with character code `code`, or -1 if it is not one. */
+export function crockfordDigit(code: number): number {
+  return code < 128 ? DIGIT_VALUES[code]! : -1;
+}
+
+/**
+ * Returns the millisecond timestamp a ULID value begins with, or -1 if `value` is not exactly a
+ * ULID as Idora writes one: 26 lowercase Crockford characters, the first no greater than `7`.
+ *
+ * One pass over the character codes, with nothing allocated, because it runs on untrusted input.
+ */
+export function readUlidTimestamp(value: string): number {
+  if (value.length !== ULID_LENGTH || value.charCodeAt(0) > 0x37) {
+    return -1;
+  }
+
+  let timestampMs = 0;
+  for (let i = 0; i < ULID_LENGTH; i++) {
+    const digit = crockfordDigit(value.charCodeAt(i));
+    if (digit < 0) {
+      return -1;
+    }
+
+    if (i < ULID_TIMESTAMP_LENGTH) {
+      // Ten digits are at most 48 bits once the first is capped at 7, well within a double's 53.
+      timestampMs = timestampMs * 32 + digit;
+    }
+  }
+
+  return timestampMs;
+}
+
+/**
+ * The lowest and highest ULID any generator can produce in `timestampMs`: the encoded timestamp
+ * followed by the smallest and largest random field.
+ */
+export function ulidBounds(timestampMs: number): { readonly lower: string; readonly upper: string } {
+  const timestamp = encodeTimestamp(timestampMs);
+  return {
+    lower: timestamp + '0'.repeat(ULID_RANDOM_LENGTH),
+    upper: timestamp + 'z'.repeat(ULID_RANDOM_LENGTH),
+  };
+}
+
 /**
  * Encodes a 48-bit millisecond timestamp as the 10 characters that begin a ULID.
  *

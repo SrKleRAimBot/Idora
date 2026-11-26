@@ -1,6 +1,6 @@
 {
   "name": "idora.js",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Idora.JS: prefixed, time-ordered entity identifiers such as usr_01k2f9v8ta7m3x0qbrn4dzeh5c. A per-entity prefix tells you what an ID identifies; a lowercase ULID (default) or UUIDv7 makes IDs sort by creation time. Zero dependencies.",
   "keywords": [
     "idora",
@@ -42,6 +42,9 @@
   "engines": {
     "node": ">=20"
   },
+  "workspaces": [
+    "extensions/*"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:test": "tsc -p tsconfig.test.json",
