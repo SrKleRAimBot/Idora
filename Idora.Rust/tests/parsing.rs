@@ -130,14 +130,16 @@ fn created_before_and_after_are_strict_at_millisecond_precision() {
 
     for same_ms in [
         minted,
-        minted + Duration::from_nanos(1),
+        minted + Duration::from_micros(1),
         minted + Duration::from_micros(999),
     ] {
         assert!(!user.created_before(same_ms));
         assert!(!user.created_after(same_ms));
     }
     assert!(user.created_before(minted + Duration::from_millis(1)));
-    assert!(user.created_after(minted - Duration::from_nanos(1)));
+    // The smallest step used here is a microsecond, not a nanosecond: `SystemTime` on Windows
+    // counts 100 ns ticks, so subtracting one nanosecond would leave the instant unchanged.
+    assert!(user.created_after(minted - Duration::from_micros(1)));
     assert!(!user.created_before(minted - Duration::from_millis(1)));
 }
 
@@ -363,7 +365,8 @@ fn a_bound_after_the_largest_timestamp_panics() {
 fn a_bound_before_the_epoch_panics() {
     let _ = Id::upper_bound(
         "usr",
-        UNIX_EPOCH - Duration::from_nanos(1),
+        // A microsecond, not a nanosecond: Windows' 100 ns `SystemTime` would round 1 ns away.
+        UNIX_EPOCH - Duration::from_micros(1),
         Strategy::UuidV7,
     );
 }
