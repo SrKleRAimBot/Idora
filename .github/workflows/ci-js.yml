@@ -49,6 +49,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Compile the declarations against the oldest supported lib
+        # The package builds with lib ES2022, so only a consumer on an older lib notices a public
+        # declaration that names a newer library type. 1.0's compiled against ES2015.
+        run: node scripts/check-declaration-lib.mjs
+
       - name: Test
         run: npm test
 

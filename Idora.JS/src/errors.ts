@@ -20,7 +20,10 @@ import type { EntityType } from './types.js';
  * ```
  */
 export abstract class IdoraError extends Error {
-  protected constructor(message: string, options?: ErrorOptions) {
+  // `{ cause }` is spelled out rather than typed as the standard ErrorOptions, which is an ES2022
+  // library type: naming it in this public declaration would stop a consumer compiling against an
+  // older `lib` from importing idora.js at all, as it could before the cause existed.
+  protected constructor(message: string, options?: { readonly cause?: unknown }) {
     super(message, options);
     this.name = new.target.name;
   }
