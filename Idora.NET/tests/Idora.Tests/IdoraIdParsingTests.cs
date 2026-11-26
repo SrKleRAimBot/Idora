@@ -608,4 +608,14 @@ public sealed class IdoraIdParsingTests
             }
         }
     }
+
+    [Fact]
+    public void ParseTryParseAndIsValid_NullTextAndAnInvalidExpectedPrefix_ReportThePrefix()
+    {
+        // Act & Assert: the expected prefix is checked before anything about the text, even its
+        // absence, in every form, as specification section 6.1 requires.
+        Should.Throw<InvalidEntityPrefixException>(() => IdoraId.Parse(null!, "us_r"));
+        Should.Throw<InvalidEntityPrefixException>(() => IdoraId.TryParse(null, "us_r", out _));
+        Should.Throw<InvalidEntityPrefixException>(() => IdoraId.IsValid(null, "us_r"));
+    }
 }

@@ -620,4 +620,13 @@ class IdoraIdTest {
             assertTrue(e.getMessage().length() < 1000, e.getClass().getSimpleName() + " message is " + e.getMessage().length());
         }
     }
+
+    @Test
+    void expectedPrefixForms_nullTextAndAnInvalidExpectedPrefix_reportThePrefix() {
+        // Act & Assert: the expected prefix is checked before anything about the text, even its
+        // absence, in every form, as specification section 6.1 requires.
+        assertThrows(InvalidEntityPrefixException.class, () -> IdoraId.parse(null, "us_r"));
+        assertThrows(InvalidEntityPrefixException.class, () -> IdoraId.tryParse(null, "us_r"));
+        assertThrows(InvalidEntityPrefixException.class, () -> IdoraId.isValid(null, "us_r"));
+    }
 }

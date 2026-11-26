@@ -303,8 +303,10 @@ public readonly struct IdoraId :
     /// </exception>
     public static IdoraId Parse(string text, string expectedPrefix)
     {
-        ArgumentNullException.ThrowIfNull(text);
+        // The expected prefix first: it is the caller's, and an invalid one is reported as such
+        // whatever the text is, even a missing one (specification section 6.1).
         EntityPrefixValidator.Validate(expectedPrefix, nameof(expectedPrefix));
+        ArgumentNullException.ThrowIfNull(text);
 
         return TryParseCore(text, expectedPrefix, out int separatorIndex, out long timestampMs) is { } failure
             ? throw CreateException(text, expectedPrefix, failure, separatorIndex)

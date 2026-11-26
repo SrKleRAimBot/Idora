@@ -166,8 +166,10 @@ public final class IdoraId implements Comparable<IdoraId>, Serializable {
      *     different prefix
      */
     public static IdoraId parse(CharSequence text, String expectedPrefix) {
-        Objects.requireNonNull(text, "text");
+        // The expected prefix first: it is the caller's, and an invalid one is reported as such
+        // whatever the text is, even a missing one (specification section 6.1).
         EntityPrefixValidator.validate(expectedPrefix, "expectedPrefix");
+        Objects.requireNonNull(text, "text");
         String string = text.toString();
         IdoraId id = read(string, expectedPrefix);
         if (id == null) {
@@ -209,8 +211,10 @@ public final class IdoraId implements Comparable<IdoraId>, Serializable {
      * @throws InvalidEntityPrefixException if {@code expectedPrefix} is not itself a valid prefix
      */
     public static Optional<IdoraId> tryParse(CharSequence text, String expectedPrefix) {
-        Objects.requireNonNull(text, "text");
+        // The expected prefix first: it is the caller's, and an invalid one is reported as such
+        // whatever the text is, even a missing one (specification section 6.1).
         EntityPrefixValidator.validate(expectedPrefix, "expectedPrefix");
+        Objects.requireNonNull(text, "text");
         return Optional.ofNullable(read(text.toString(), expectedPrefix));
     }
 
@@ -235,8 +239,10 @@ public final class IdoraId implements Comparable<IdoraId>, Serializable {
      * @throws InvalidEntityPrefixException if {@code expectedPrefix} is not itself a valid prefix
      */
     public static boolean isValid(CharSequence text, String expectedPrefix) {
-        Objects.requireNonNull(text, "text");
+        // The expected prefix first: it is the caller's, and an invalid one is reported as such
+        // whatever the text is, even a missing one (specification section 6.1).
         EntityPrefixValidator.validate(expectedPrefix, "expectedPrefix");
+        Objects.requireNonNull(text, "text");
         return read(text.toString(), expectedPrefix) != null;
     }
 
