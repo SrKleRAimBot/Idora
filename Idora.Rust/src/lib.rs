@@ -11,7 +11,8 @@
 //!
 //! This crate is the Rust member of the [Idora](https://github.com/SrKleRAimBot/Idora) family:
 //! it implements the shared [specification] and produces identifiers indistinguishable from
-//! Idora.NET, Idora.JS, Idora.Java and Idora.Go. It has **no dependencies** of any kind.
+//! Idora.NET, Idora.JS, Idora.Java and Idora.Go. By default it has **no dependencies** of any
+//! kind; see [Cargo features](#cargo-features) for the optional ones.
 //!
 //! # Quick start
 //!
@@ -50,6 +51,35 @@
 //!
 //! A prefix is 1 to 16 ASCII letters or digits; see [`validate_prefix`].
 //!
+//! # Reading identifiers back
+//!
+//! Identifiers come back in routes, messages and foreign keys. [`Id`] parses any conforming
+//! identifier, from any Idora package and in either format, strictly: what a generator emits is
+//! accepted and nothing else is. It exposes the prefix, the value, the format and the timestamp,
+//! orders chronologically across entities and formats, and is a `Copy` value with no heap
+//! allocation.
+//!
+//! ```
+//! use idora::{Entity, Id, Idora};
+//!
+//! struct User;
+//! impl Entity for User {
+//!     const PREFIX: &'static str = "usr";
+//! }
+//! let ids = Idora::builder().register_entity::<User>()?.build();
+//!
+//! let id: Id = "usr_01k226e0g0008j4ct4ank7f24s".parse()?;   // any prefix
+//! assert_eq!((id.prefix(), id.timestamp_ms()), ("usr", 1_754_568_000_000));
+//!
+//! let user = ids.parse::<User>("usr_01k226e0g0008j4ct4ank7f24s")?; // the registered prefix
+//! assert!(ids.parse::<User>("ord_01k226e0g0008j4ct4ank7f24s").is_err());
+//! assert_eq!(user, id);
+//! # Ok::<(), idora::Error>(())
+//! ```
+//!
+//! [`TypedId<E>`](TypedId) carries the entity in the type, and [`Id::lower_bound`] and
+//! [`Id::upper_bound`] turn a time window into a range of strings a database index can answer.
+//!
 //! # Threads and ordering
 //!
 //! An [`Idora`] is immutable, `Send + Sync` and cheap to clone. Generating takes no lock: the
@@ -58,30 +88,49 @@
 //! even if the wall clock steps backwards. Across threads, and for UUIDv7, identifiers are ordered
 //! by millisecond only.
 //!
+//! # Cargo features
+//!
+//! Both are off by default, and the default build has no dependencies at all.
+//!
+//! - **`serde`**: `Serialize` and `Deserialize` for [`Id`] and [`TypedId`], as strings.
+//!   Deserializing validates, so a malformed identifier fails at the boundary.
+//! - **`sqlx`**: `Type`, `Encode` and `Decode` from [sqlx](https://docs.rs/sqlx) 0.9 for [`Id`]
+//!   and [`TypedId`], generic over the database, so either binds as a query parameter and decodes
+//!   from any text column. Decoding validates. sqlx 0.9 needs Rust 1.94.
+//!
 //! [specification]: https://github.com/SrKleRAimBot/Idora/blob/main/spec/SPECIFICATION.md
 
 #![deny(unsafe_op_in_unsafe_fn)]
 #![warn(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod builder;
 mod entity;
 mod error;
 mod generator;
+mod id;
 mod prefix;
+#[cfg(feature = "serde")]
+mod serde_impls;
+#[cfg(feature = "sqlx")]
+mod sqlx_impls;
 mod strategy;
 mod sys;
 mod thread_state;
+mod typed;
 mod value;
 
 pub use builder::Builder;
 pub use entity::{Entity, EntitySet};
 pub use error::{
-    DuplicateKind, DuplicatePrefixError, Error, InvalidPrefixError, InvalidPrefixReason,
-    PrefixNotRegisteredError,
+    DuplicateKind, DuplicatePrefixError, Error, InvalidIdError, InvalidIdReason,
+    InvalidPrefixError, InvalidPrefixReason, PrefixNotRegisteredError,
 };
 pub use generator::{Idora, Registration};
+pub use id::Id;
 pub use prefix::{MAX_PREFIX_LEN, SEPARATOR, is_valid_prefix, validate_prefix};
 pub use strategy::Strategy;
+pub use typed::TypedId;
 
 /// Not public API. The pure encoding functions, exposed only so this crate's own conformance
 /// suite (`tests/conformance.rs`) can feed them the shared vectors with known clocks and known

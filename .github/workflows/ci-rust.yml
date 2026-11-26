@@ -14,6 +14,8 @@ env:
   # Deliberately not UTC, so the time-zone assertions in tests/timestamp.rs are live.
   TZ: Australia/Sydney
 
+# Idora.Rust is a workspace: the `idora` crate at the root, `idora-axum` in crates/, and the
+# unpublished `idora-tests`, which holds the tests for idora's optional serde and sqlx features.
 jobs:
   test:
     # Every operating system, because each has its own entropy source in src/sys.rs:
@@ -35,25 +37,39 @@ jobs:
         run: rustup update stable && rustup default stable && rustup component add rustfmt clippy
 
       - name: Check formatting
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+      - name: Clippy (everything)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-      - name: Test
-        run: cargo test
+      - name: Clippy (the core, no features)
+        # The feature-gated modules compile away; what is left must be just as clean.
+        run: cargo clippy -p idora --all-targets -- -D warnings
+
+      - name: Test the core, no features
+        # The dependency-free build users get by default: unit, integration, conformance,
+        # allocation and doc tests, with nothing compiled but idora itself.
+        run: cargo test -p idora
+
+      - name: Test the workspace, all features
+        # idora with serde and sqlx (exercised by crates/idora-tests against serde_json and an
+        # in-memory SQLite), and idora-axum with request-id.
+        run: cargo test --workspace --all-features
+
+      - name: Test idora-axum, no features
+        run: cargo test -p idora-axum
 
       - name: Docs
-        run: cargo doc --no-deps
+        run: cargo doc --workspace --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
 
       - name: Benchmark (smoke)
         # Compiles and runs the hand-rolled harness; numbers from shared runners are not meaningful.
-        run: cargo bench
+        run: cargo bench -p idora
 
   msrv:
-    # The rust-version in Cargo.toml is a promise; build and test on exactly that toolchain.
+    # Each rust-version in a Cargo.toml is a promise; build and test on exactly that toolchain.
     runs-on: ubuntu-latest
 
     defaults:
@@ -63,11 +79,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Rust 1.85
-        run: rustup toolchain install 1.85 --profile minimal && rustup default 1.85
+      - name: Set up Rust 1.85 and 1.94
+        run: |
+          rustup toolchain install 1.85 --profile minimal
+          rustup toolchain install 1.94 --profile minimal
+          rustup default 1.85
 
-      - name: Test
-        run: cargo test
+      - name: Test the core on 1.85
+        run: cargo test -p idora
+
+      - name: Test the core's serde feature on 1.85
+        run: cargo test -p idora --features serde
+
+      - name: Test idora-axum on 1.85
+        run: cargo test -p idora-axum --all-features
+
+      - name: Test the core's sqlx feature on 1.94
+        # sqlx 0.9 requires Rust 1.94, so the feature does too; the rest of the crate keeps 1.85.
+        run: cargo +1.94 test -p idora-tests
 
   package:
     runs-on: ubuntu-latest
@@ -79,12 +108,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check the crate has no dependencies
-        # The zero-dependency promise covers dev-dependencies too, so it is enforced.
+      - name: Set up Rust
+        run: rustup update stable && rustup default stable
+
+      - name: Check the core has no dependencies by default
+        # The zero-dependency promise covers dev-dependencies too, so it is enforced: idora may
+        # declare only optional, non-dev dependencies, and its default build pulls in nothing.
         run: |
-          if cargo metadata --format-version 1 --no-deps | grep -q '"dependencies":\[{'; then
-            echo "::error::Cargo.toml declares a dependency"; exit 1
+          if ! cargo metadata --format-version 1 --no-deps \
+              | jq -e '.packages[] | select(.name == "idora") | .dependencies | all(.optional and .kind == null)' >/dev/null; then
+            echo "::error::idora declares a non-optional dependency or a dev-dependency"; exit 1
+          fi
+          if [ "$(cargo tree -p idora --edges all --prefix none | wc -l)" -ne 1 ]; then
+            cargo tree -p idora --edges all
+            echo "::error::idora's default build has dependencies"; exit 1
           fi
 
       - name: Package
-        run: cargo package
+        # Packages idora and idora-axum together; idora-axum is verified against the idora package
+        # just built, through a temporary local registry, before idora is on crates.io.
+        run: cargo package --workspace --exclude idora-tests

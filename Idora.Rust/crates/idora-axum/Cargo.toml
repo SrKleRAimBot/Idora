@@ -1,0 +1,44 @@
+[package]
+name = "idora-axum"
+version = "1.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "axum extractors for Idora identifiers: parse and check usr_01k2f9v8ta7m3x0qbrn4dzeh5c path segments against the registry, with 400 and 404 rejections that say what is wrong."
+license = "MIT"
+repository = "https://github.com/SrKleRAimBot/Idora"
+homepage = "https://github.com/SrKleRAimBot/Idora/tree/main/Idora.Rust/crates/idora-axum"
+documentation = "https://docs.rs/idora-axum"
+readme = "README.md"
+keywords = ["id", "ulid", "axum", "extractor", "prefix"]
+categories = ["web-programming::http-server", "encoding"]
+include = ["src/**/*.rs", "Cargo.toml", "README.md", "LICENSE"]
+
+[dependencies]
+idora = { version = "1.1.0", path = "../.." }
+axum = { version = "0.8.4", default-features = false }
+tower-http = { version = "0.6.6", default-features = false, features = ["request-id"], optional = true }
+
+[features]
+# MakeIdoraRequestId: Idora identifiers as request ids for tower-http's SetRequestIdLayer.
+request-id = ["dep:tower-http"]
+
+[dev-dependencies]
+# For the documentation's and tests' Path<(TypedId<A>, TypedId<B>)> examples.
+idora = { version = "1.1.0", path = "../..", features = ["serde"] }
+axum = { version = "0.8.4", default-features = false, features = ["tokio", "http1", "json"] }
+http-body-util = "0.1.3"
+tokio = { version = "1.44", features = ["macros", "rt"] }
+tower = { version = "0.5.2", features = ["util"] }
+tower-http = { version = "0.6.6", default-features = false, features = ["request-id"] }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(docsrs)"] }
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }

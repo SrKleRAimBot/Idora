@@ -1,4 +1,5 @@
-//! The generator (specification §5) and its read-only registry (§5.3).
+//! The generator (specification §5), its read-only registry (§5.3) and registry-aware parsing
+//! (§6.1).
 
 #![forbid(unsafe_code)]
 
@@ -9,13 +10,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::builder::Builder;
-use crate::error::{InvalidPrefixError, PrefixNotRegisteredError};
-use crate::prefix::{self, MAX_PREFIX_LEN};
+use crate::error::{Error, InvalidPrefixError, PrefixNotRegisteredError};
+use crate::id::{Id, MAX_ID_LEN};
+use crate::prefix;
 use crate::strategy::Strategy;
 use crate::value::{self, ULID_LEN, UUID_LEN};
-
-/// The longest identifier there can be: a 16-character prefix, the separator and a UUID.
-const MAX_ID_LEN: usize = MAX_PREFIX_LEN + 1 + UUID_LEN;
 
 /// Generates prefixed, time-ordered identifiers such as `usr_01k2f9v8ta7m3x0qbrn4dzeh5c`.
 ///
@@ -25,7 +24,8 @@ const MAX_ID_LEN: usize = MAX_PREFIX_LEN + 1 + UUID_LEN;
 /// begin with a millisecond timestamp, so identifiers sort into creation order as plain strings.
 ///
 /// Generating an identifier costs exactly one allocation, the returned `String`, and takes no
-/// lock. See the crate documentation for the threading and ordering guarantees.
+/// lock; [`generate_id`](Self::generate_id) returns an [`Id`] instead and costs none. See the
+/// crate documentation for the threading and ordering guarantees.
 ///
 /// ```
 /// use idora::{Entity, Idora};
@@ -205,6 +205,113 @@ impl Idora {
         }
     }
 
+    /// Generates an identifier for `T` as an [`Id`] rather than a `String`: no allocation at all,
+    /// and the prefix, value and timestamp are at hand without parsing.
+    ///
+    /// # Errors
+    ///
+    /// As [`generate`](Self::generate).
+    ///
+    /// # Panics
+    ///
+    /// As [`generate`](Self::generate).
+    ///
+    /// ```
+    /// struct Order;
+    /// let ids = idora::Idora::builder().register::<Order>("ord")?.build();
+    /// let id = ids.generate_id::<Order>()?;
+    /// assert_eq!(id.prefix(), "ord");
+    /// assert!(id.timestamp_ms() > 0);
+    /// # Ok::<(), idora::Error>(())
+    /// ```
+    #[inline]
+    pub fn generate_id<T: ?Sized + 'static>(&self) -> Result<Id, PrefixNotRegisteredError> {
+        match self.find(TypeId::of::<T>()) {
+            Some(registration) => {
+                let head = &registration.prefix_with_separator;
+                let (buf, len) = self.compose_into_buffer(head, false);
+                Ok(Self::to_id(&buf[..len], head.len() - 1))
+            }
+            None => Err(PrefixNotRegisteredError::of::<T>()),
+        }
+    }
+
+    /// Generates an identifier with a prefix supplied at the call site, as an [`Id`]. See
+    /// [`generate_with_prefix`](Self::generate_with_prefix).
+    ///
+    /// # Errors
+    ///
+    /// As [`generate_with_prefix`](Self::generate_with_prefix).
+    ///
+    /// # Panics
+    ///
+    /// As [`generate`](Self::generate).
+    #[inline]
+    pub fn generate_id_with_prefix(&self, prefix: &str) -> Result<Id, InvalidPrefixError> {
+        match prefix::check(prefix) {
+            None => {
+                let (buf, len) = self.compose_into_buffer(prefix, true);
+                Ok(Self::to_id(&buf[..len], prefix.len()))
+            }
+            Some(reason) => Err(InvalidPrefixError::new(prefix, reason)),
+        }
+    }
+
+    /// Parses an identifier that must carry the prefix registered for `T` (§6.1).
+    ///
+    /// The registered prefix is compared exactly, case included. This is the check to make on an
+    /// identifier that arrives in a route, a message or a foreign key and is supposed to name a
+    /// `T`.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::PrefixNotRegistered`] if `T` was never registered, whatever `text` is: the
+    ///   identifier is not at fault.
+    /// - [`Error::InvalidId`] if `text` is not an identifier, or is one with another prefix.
+    ///
+    /// ```
+    /// use idora::{Error, Idora, InvalidIdReason};
+    ///
+    /// struct User;
+    /// struct Order;
+    /// let ids = Idora::builder().register::<User>("usr")?.register::<Order>("ord")?.build();
+    ///
+    /// let id = ids.parse::<User>("usr_01k226e0g0008j4ct4ank7f24s")?;
+    /// assert_eq!(id.prefix(), "usr");
+    ///
+    /// match ids.parse::<Order>("usr_01k226e0g0008j4ct4ank7f24s") {
+    ///     Err(Error::InvalidId(e)) => assert_eq!(e.expected_prefix(), Some("ord")),
+    ///     other => panic!("expected a prefix mismatch, got {other:?}"),
+    /// }
+    /// # Ok::<(), idora::Error>(())
+    /// ```
+    pub fn parse<T: ?Sized + 'static>(&self, text: &str) -> Result<Id, Error> {
+        let expected = self.prefix_of::<T>()?;
+        Ok(Id::parse_with_prefix(text, expected)?)
+    }
+
+    /// Returns whether `text` is an identifier carrying the prefix registered for `T`. Never
+    /// allocates unless `T` is unregistered.
+    ///
+    /// # Errors
+    ///
+    /// [`PrefixNotRegisteredError`] if `T` was never registered. An unregistered type is a bug in
+    /// the program, not a property of the text, so it is not reported as `false`.
+    ///
+    /// ```
+    /// struct User;
+    /// let ids = idora::Idora::builder().register::<User>("usr")?.build();
+    /// assert!(ids.is_id_for::<User>("usr_01k226e0g0008j4ct4ank7f24s")?);
+    /// assert!(!ids.is_id_for::<User>("ord_01k226e0g0008j4ct4ank7f24s")?);
+    /// # Ok::<(), idora::Error>(())
+    /// ```
+    pub fn is_id_for<T: ?Sized + 'static>(
+        &self,
+        text: &str,
+    ) -> Result<bool, PrefixNotRegisteredError> {
+        Ok(Id::is_valid_with_prefix(text, self.prefix_of::<T>()?))
+    }
+
     /// The prefix registered for `T`, without the trailing separator.
     ///
     /// # Errors
@@ -276,6 +383,28 @@ impl Idora {
     /// allocation an identifier costs.
     #[inline]
     fn compose(&self, head: &str, add_separator: bool) -> String {
+        let (buf, len) = self.compose_into_buffer(head, add_separator);
+        // Every byte is ASCII by construction (a validated prefix, `_`, and an ASCII alphabet),
+        // so this check always passes; it is what keeps the crate free of `unsafe` here.
+        core::str::from_utf8(&buf[..len])
+            .expect("identifiers are ASCII")
+            .to_owned()
+    }
+
+    /// Wraps freshly composed text, whose prefix is `prefix_len` bytes, as an [`Id`]. The
+    /// timestamp is read back out of the value rather than threaded through, which costs a few
+    /// nanoseconds and keeps one source of truth.
+    #[inline]
+    fn to_id(text: &[u8], prefix_len: usize) -> Id {
+        let (_, timestamp_ms) = value::read_value(&text[prefix_len + 1..])
+            .expect("a generated value is always well formed");
+        Id::from_parts(text, prefix_len, timestamp_ms)
+    }
+
+    /// Writes `head` (and a separator, if `add_separator`) then a fresh value into a stack buffer,
+    /// returning the buffer and how much of it is used.
+    #[inline]
+    fn compose_into_buffer(&self, head: &str, add_separator: bool) -> ([u8; MAX_ID_LEN], usize) {
         let mut buf = [0u8; MAX_ID_LEN];
         let mut len = head.len();
         buf[..len].copy_from_slice(head.as_bytes());
@@ -299,11 +428,7 @@ impl Idora {
                 len += UUID_LEN;
             }
         }
-        // Every byte is ASCII by construction (a validated prefix, `_`, and an ASCII alphabet),
-        // so this check always passes; it is what keeps the crate free of `unsafe` here.
-        core::str::from_utf8(&buf[..len])
-            .expect("identifiers are ASCII")
-            .to_owned()
+        (buf, len)
     }
 }
 

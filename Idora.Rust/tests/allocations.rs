@@ -1,5 +1,6 @@
 //! Proves that generating an identifier costs exactly one heap allocation: the returned `String`,
-//! sized exactly. A counting global allocator is installed for this test binary only.
+//! sized exactly, or none at all for an `Id`. Parsing and comparing cost none. A counting global
+//! allocator is installed for this test binary only.
 
 #![allow(unsafe_code)]
 
@@ -134,6 +135,41 @@ fn validation_and_lookups_do_not_allocate_on_success() {
         assert_eq!(ids.prefix_of::<User>().unwrap(), "usr");
         assert_eq!(ids.registrations().len(), 1);
         let _shared = ids.clone();
+    });
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn generating_an_id_value_does_not_allocate_at_all() {
+    for (name, ids) in generators() {
+        let _warm = ids.generate_id::<User>().unwrap();
+        let (count, id) = allocations_during(|| {
+            let id = ids.generate_id::<User>().unwrap();
+            let _ = ids.generate_id_with_prefix("tmp").unwrap();
+            id
+        });
+        assert_eq!(count, 0, "{name}: {id}");
+    }
+}
+
+#[test]
+fn parsing_checking_and_comparing_do_not_allocate_on_success_or_on_a_plain_check() {
+    let [(_, ids), _] = generators();
+    let (count, ()) = allocations_during(|| {
+        let a = idora::Id::parse("usr_01k226e0g0008j4ct4ank7f24s").unwrap();
+        let b =
+            idora::Id::parse_with_prefix("usr_0198846702007011a233445566778899", "usr").unwrap();
+        assert!(b.is_before(&a) && a.same_millisecond(&b) && a != b);
+        assert_eq!((a.prefix(), a.as_str().len()), ("usr", 30));
+        assert!(ids.parse::<User>(b.as_str()).is_ok());
+        // A failed boolean check allocates nothing either: no error is built.
+        assert!(!idora::Id::is_valid("usr_not-an-id"));
+        assert!(!idora::Id::is_valid_with_prefix(a.as_str(), "ord"));
+        assert_eq!(
+            ids.is_id_for::<User>("ord_01k226e0g0008j4ct4ank7f24s"),
+            Ok(false)
+        );
+        let _bound = idora::Id::lower_bound("usr", a.created_at(), idora::Strategy::Ulid).unwrap();
     });
     assert_eq!(count, 0);
 }

@@ -1,4 +1,4 @@
-//! The three ways Idora can fail (specification §6).
+//! The four ways Idora can fail (specification §7).
 
 #![forbid(unsafe_code)]
 
@@ -10,11 +10,12 @@ use crate::prefix::MAX_PREFIX_LEN;
 /// Any error Idora reports.
 ///
 /// Each operation returns the most specific error it can: [`Idora::generate`](crate::Idora::generate)
-/// can only fail with a [`PrefixNotRegisteredError`], and
+/// can only fail with a [`PrefixNotRegisteredError`],
 /// [`Idora::generate_with_prefix`](crate::Idora::generate_with_prefix) only with an
-/// [`InvalidPrefixError`]. Registration can fail in two ways and returns this enum. Every specific
-/// error converts into it with `?`, so a function that does several of these can return
-/// `Result<_, idora::Error>`.
+/// [`InvalidPrefixError`], and [`Id::parse`](crate::Id::parse) only with an [`InvalidIdError`].
+/// Registration and the registry-aware [`Idora::parse`](crate::Idora::parse) can fail in two ways
+/// and return this enum. Every specific error converts into it with `?`, so a function that does
+/// several of these can return `Result<_, idora::Error>`.
 ///
 /// ```
 /// use idora::{Error, Idora};
@@ -44,6 +45,8 @@ pub enum Error {
     DuplicatePrefix(DuplicatePrefixError),
     /// An identifier or prefix was asked for a type that was never registered.
     PrefixNotRegistered(PrefixNotRegisteredError),
+    /// Text that was parsed as an identifier is not one, or carries the wrong prefix.
+    InvalidId(InvalidIdError),
 }
 
 impl fmt::Display for Error {
@@ -52,15 +55,22 @@ impl fmt::Display for Error {
             Self::InvalidPrefix(e) => e.fmt(f),
             Self::DuplicatePrefix(e) => e.fmt(f),
             Self::PrefixNotRegistered(e) => e.fmt(f),
+            Self::InvalidId(e) => e.fmt(f),
         }
     }
 }
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        // The variant's own message is already this error's message, so there is nothing further
-        // down the chain to report.
-        None
+        // The variant's own message is already this error's message, so the chain continues with
+        // whatever the variant itself wraps: the prefix error behind an invalid identifier, and
+        // otherwise nothing.
+        match self {
+            Self::InvalidId(e) => std::error::Error::source(e),
+            Self::InvalidPrefix(_) | Self::DuplicatePrefix(_) | Self::PrefixNotRegistered(_) => {
+                None
+            }
+        }
     }
 }
 
@@ -79,6 +89,12 @@ impl From<DuplicatePrefixError> for Error {
 impl From<PrefixNotRegisteredError> for Error {
     fn from(error: PrefixNotRegisteredError) -> Self {
         Self::PrefixNotRegistered(error)
+    }
+}
+
+impl From<InvalidIdError> for Error {
+    fn from(error: InvalidIdError) -> Self {
+        Self::InvalidId(error)
     }
 }
 
@@ -416,6 +432,164 @@ impl fmt::Display for PrefixNotRegisteredError {
 
 impl std::error::Error for PrefixNotRegisteredError {}
 
+/// Why a piece of text is not an acceptable identifier (specification §6.1).
+///
+/// The checks run in the order of the variants, and the first failure is reported.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InvalidIdReason {
+    /// The text contains no `_`, so it has no prefix and no value.
+    NoSeparator,
+    /// Everything before the first `_` is not a valid prefix. The [`InvalidPrefixError`] says which
+    /// rule it breaks, and is also this error's [`source`](std::error::Error::source).
+    Prefix(InvalidPrefixError),
+    /// Everything after the first `_` is neither a 26-character lowercase ULID nor a 32-character
+    /// lowercase UUIDv7.
+    Value,
+    /// The identifier is well formed, but its prefix is not exactly the one the caller expected.
+    PrefixMismatch {
+        /// The prefix the caller asked for.
+        expected: String,
+    },
+}
+
+/// Text that was parsed as an identifier is not one, or is one for a different entity.
+///
+/// Returned by [`Id::parse`](crate::Id::parse) and [`Id::parse_with_prefix`](crate::Id::parse_with_prefix),
+/// by [`str::parse`] into an [`Id`](crate::Id), and inside [`Error::InvalidId`] by the
+/// registry-aware [`Idora::parse`](crate::Idora::parse). Parsing is strict: it accepts exactly the
+/// text a conforming generator emits, with no trimming and no case folding.
+///
+/// The text usually comes from outside (a URL, a request body, a message), so the message quotes
+/// it with control characters escaped and anything past 64 characters elided. [`text`](Self::text)
+/// returns it untouched.
+///
+/// ```
+/// use idora::{Id, InvalidIdReason};
+///
+/// let error = Id::parse_with_prefix("usr_01k226e0g0008j4ct4ank7f24s", "ord").unwrap_err();
+/// assert_eq!(error.text(), "usr_01k226e0g0008j4ct4ank7f24s");
+/// assert_eq!(error.expected_prefix(), Some("ord"));
+/// assert!(matches!(error.reason(), InvalidIdReason::PrefixMismatch { .. }));
+/// assert_eq!(
+///     error.to_string(),
+///     "The identifier 'usr_01k226e0g0008j4ct4ank7f24s' has the prefix 'usr', but an identifier \
+///      with the prefix 'ord' was expected. Prefixes are compared exactly, case included; check \
+///      that the identifier refers to the right kind of entity."
+/// );
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvalidIdError {
+    text: String,
+    reason: InvalidIdReason,
+}
+
+impl InvalidIdError {
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn new(text: &str, reason: InvalidIdReason) -> Self {
+        Self {
+            text: text.to_owned(),
+            reason,
+        }
+    }
+
+    /// The text that was rejected, exactly as supplied.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Why the text was rejected.
+    #[must_use]
+    pub fn reason(&self) -> &InvalidIdReason {
+        &self.reason
+    }
+
+    /// The prefix the caller expected, for [`InvalidIdReason::PrefixMismatch`].
+    #[must_use]
+    pub fn expected_prefix(&self) -> Option<&str> {
+        match &self.reason {
+            InvalidIdReason::PrefixMismatch { expected } => Some(expected),
+            _ => None,
+        }
+    }
+
+    /// The text before the first `_`, if there is one.
+    fn prefix_part(&self) -> &str {
+        self.text.split_once('_').map_or("", |(prefix, _)| prefix)
+    }
+}
+
+impl fmt::Display for InvalidIdError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = Quoted(&self.text);
+        match &self.reason {
+            InvalidIdReason::NoSeparator => write!(
+                f,
+                "The text {text} is not an Idora identifier: it contains no '_' separator. An \
+                 identifier is a prefix, an underscore and a value, for example \
+                 'usr_01k2f9v8ta7m3x0qbrn4dzeh5c'."
+            ),
+            InvalidIdReason::Prefix(_) => write!(
+                f,
+                "The identifier {text} does not begin with a valid prefix: everything before the \
+                 first '_' must be 1 to {MAX_PREFIX_LEN} ASCII letters or digits."
+            ),
+            InvalidIdReason::Value => write!(
+                f,
+                "The identifier {text} does not end in a valid value: everything after the first \
+                 '_' must be a 26-character lowercase ULID or a 32-character lowercase UUIDv7 \
+                 without hyphens. Identifiers are case-sensitive and are never trimmed."
+            ),
+            InvalidIdReason::PrefixMismatch { expected } => write!(
+                f,
+                "The identifier {text} has the prefix {prefix}, but an identifier with the prefix \
+                 {expected} was expected. Prefixes are compared exactly, case included; check \
+                 that the identifier refers to the right kind of entity.",
+                prefix = Quoted(self.prefix_part()),
+                expected = Quoted(expected),
+            ),
+        }
+    }
+}
+
+impl std::error::Error for InvalidIdError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self.reason {
+            InvalidIdReason::Prefix(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+/// Writes untrusted text between single quotes, escaping control characters and quotes, and
+/// eliding everything past the first [`Quoted::LIMIT`] characters.
+struct Quoted<'a>(&'a str);
+
+impl Quoted<'_> {
+    /// Comfortably more than the longest identifier (49 characters).
+    const LIMIT: usize = 64;
+}
+
+impl fmt::Display for Quoted<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("'")?;
+        for ch in self.0.chars().take(Self::LIMIT) {
+            if ch == '\'' {
+                f.write_str("\\'")?;
+            } else {
+                write!(f, "{}", ch.escape_debug())?;
+            }
+        }
+        f.write_str("'")?;
+        if self.0.chars().nth(Self::LIMIT).is_some() {
+            write!(f, " (truncated, {} characters)", self.0.chars().count())?;
+        }
+        Ok(())
+    }
+}
+
 /// `my_app::model::User` becomes `User`; `my_app::Wrapper<my_app::User>` becomes
 /// `Wrapper<my_app::User>`.
 fn short_type_name(name: &str) -> &str {
@@ -428,7 +602,23 @@ fn short_type_name(name: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::short_type_name;
+    use super::{Quoted, short_type_name};
+
+    #[test]
+    fn quoted_escapes_and_truncates_untrusted_text() {
+        assert_eq!(Quoted("usr_1").to_string(), "'usr_1'");
+        assert_eq!(Quoted("a\nb'c\"").to_string(), r#"'a\nb\'c\"'"#);
+        assert_eq!(Quoted("café").to_string(), "'café'");
+        let long = "x".repeat(100);
+        assert_eq!(
+            Quoted(&long).to_string(),
+            format!("'{}' (truncated, 100 characters)", "x".repeat(64))
+        );
+        assert_eq!(
+            Quoted(&long[..64]).to_string(),
+            format!("'{}'", "x".repeat(64))
+        );
+    }
 
     #[test]
     fn short_type_name_strips_only_the_outer_path() {

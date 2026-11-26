@@ -1,5 +1,5 @@
 //! Per-thread state: the buffered entropy pool (specification §3.3) and the monotonic ULID stream
-//! (§3.1, §7).
+//! (§3.1, §8).
 //!
 //! Both live in one `thread_local!` with a `const` initialiser and no destructor, so reaching them
 //! costs a thread-pointer offset rather than a lazy-initialisation check, and there is no shared

@@ -1,7 +1,9 @@
 name: Release Idora.Rust
 
-# Publishing is driven entirely by tags: `git tag Idora.Rust/v1.0.0 && git push origin Idora.Rust/v1.0.0`.
-# The tag must match the version in Cargo.toml, which crates.io reads from the package itself.
+# Publishing is driven entirely by tags: `git tag Idora.Rust/v1.1.0 && git push origin Idora.Rust/v1.1.0`.
+# One tag releases every published crate in the workspace, in dependency order: `idora` first,
+# then the crates in crates/ that depend on it. All of them carry the same version, and the tag
+# must match it; crates.io reads the version from each package itself.
 on:
   push:
     tags: ['Idora.Rust/v*']
@@ -12,6 +14,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   TZ: Australia/Sydney
+  # In publish order. idora-tests is never published (publish = false).
+  CRATES: idora idora-axum
 
 jobs:
   publish:
@@ -33,29 +37,35 @@ jobs:
       - name: Set up Rust
         run: rustup update stable && rustup default stable
 
-      - name: Check the tag matches Cargo.toml
+      - name: Check the tag matches every crate's Cargo.toml
         id: tag
         if: github.event_name == 'push'
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#Idora.Rust/v}"
           echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
-          CRATE_VERSION=$(cargo metadata --format-version 1 --no-deps | sed -n 's/.*"name":"idora","version":"\([^"]*\)".*/\1/p')
-          echo "Tag: $TAG_VERSION, Cargo.toml: $CRATE_VERSION"
-          if [ "$TAG_VERSION" != "$CRATE_VERSION" ]; then
-            echo "::error::tag version $TAG_VERSION does not match Cargo.toml version $CRATE_VERSION"
-            exit 1
-          fi
+          METADATA=$(cargo metadata --format-version 1 --no-deps)
+          for crate in $CRATES; do
+            CRATE_VERSION=$(echo "$METADATA" | jq -r --arg name "$crate" '.packages[] | select(.name == $name) | .version')
+            echo "Tag: $TAG_VERSION, $crate: $CRATE_VERSION"
+            if [ "$TAG_VERSION" != "$CRATE_VERSION" ]; then
+              echo "::error::tag version $TAG_VERSION does not match $crate's Cargo.toml version $CRATE_VERSION"
+              exit 1
+            fi
+          done
 
       - name: Test
-        run: cargo test
+        run: |
+          cargo test -p idora
+          cargo test --workspace --all-features
 
       - name: Package
-        run: cargo package
+        # idora-axum is verified against the idora package built here, before idora is published.
+        run: cargo package --workspace --exclude idora-tests
 
-      - name: Upload crate as a build artifact
+      - name: Upload crates as a build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: crate
+          name: crates
           path: Idora.Rust/target/package/*.crate
 
       - name: Authenticate with crates.io (OIDC, short-lived token)
@@ -64,9 +74,23 @@ jobs:
         id: auth
 
       - name: Publish to crates.io
-        # The irreversible step. Reachable only from an Idora.Rust/v* tag push.
+        # The irreversible step. Reachable only from an Idora.Rust/v* tag push. Crates go up in
+        # dependency order, and `cargo publish` waits until each is in the index before the next
+        # resolves against it. A version already on crates.io is skipped, so a run that failed
+        # half-way through can simply be re-run.
         if: github.event_name == 'push'
-        run: cargo publish
+        run: |
+          for crate in $CRATES; do
+            VERSION="${{ steps.tag.outputs.version }}"
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H 'User-Agent: Idora release workflow (github.com/SrKleRAimBot/Idora)' \
+              "https://crates.io/api/v1/crates/$crate/$VERSION")
+            if [ "$STATUS" = "200" ]; then
+              echo "$crate $VERSION is already on crates.io; skipping"
+              continue
+            fi
+            cargo publish -p "$crate"
+          done
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
