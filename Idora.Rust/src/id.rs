@@ -368,13 +368,15 @@ impl Id {
     /// use std::time::{Duration, SystemTime};
     /// use idora::{Id, Strategy};
     ///
+    /// let minted_now = idora::Idora::new().generate_with_prefix("usr")?;
+    ///
+    /// // Read the clock after minting, so the window is sure to include the identifier.
     /// let to = SystemTime::now();
     /// let from = to - Duration::from_secs(24 * 60 * 60);
     /// let lower = Id::lower_bound("usr", from, Strategy::Ulid)?;
     /// let upper = Id::upper_bound("usr", to, Strategy::Ulid)?;
     ///
     /// // SELECT * FROM users WHERE id >= $1 AND id <= $2
-    /// let minted_now = idora::Idora::new().generate_with_prefix("usr")?;
     /// assert!(lower.as_str() <= minted_now.as_str() && minted_now.as_str() <= upper.as_str());
     /// # Ok::<(), idora::InvalidPrefixError>(())
     /// ```
