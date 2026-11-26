@@ -119,6 +119,11 @@ await db.select().from(users).where(createdBetween(users.id, from, to));
 //   $1 = 'usr_01k226e0g00000000000000000', $2 = 'usr_01k2…zzzzzzzzzzzzzzzz'
 ```
 
+The database compares them with the column's collation, which must order the digits before the lowercase
+letters character by character: binary and ordinary linguistic collations do, but a numeric
+("natural sort") collation does not, and returns nothing for the range. See
+[§6.4 of the specification](https://github.com/SrKleRAimBot/Idora/blob/main/spec/SPECIFICATION.md#64-range-bounds).
+
 The bounds are the lowest and highest identifiers any generator can mint for the column's entity
 type in its format, so the query is an ordinary range over the column and uses its index — the
 primary key's, for a primary key. It is tested against a real PostgreSQL (PGlite) and SQLite,

@@ -428,6 +428,11 @@ of the **same prefix and format**, which is exactly what a key column holds. The
 [Entity Framework Core package](https://github.com/SrKleRAimBot/Idora/tree/main/Idora.NET/src/Idora.EntityFrameworkCore)
 wraps this as `WhereCreatedBetween(order => order.Id, "ord", from, to)`.
 
+The database compares them with the column's collation, which must order the digits before the lowercase
+letters character by character: binary and ordinary linguistic collations do, but a numeric
+("natural sort") collation does not, and returns nothing for the range. See
+[§6.4 of the specification](https://github.com/SrKleRAimBot/Idora/blob/main/spec/SPECIFICATION.md#64-range-bounds).
+
 `IdoraId.GetLength("usr", IdGenerationStrategy.Ulid)` is the exact length of every such identifier
 (30), and `IdoraId.GetMaxLength(...)` the longest any prefix can produce (43 for ULIDs, 49 for
 UUIDv7s) — the numbers to size a column with.

@@ -98,6 +98,11 @@ from the generator; `CreatedBetween` takes both explicitly. Use the format the r
 with: the bounds compare correctly only against identifiers of the same prefix and format, which
 is what a column holding one entity type contains.
 
+The database compares them with the column's collation, which must order the digits before the lowercase
+letters character by character: binary and ordinary linguistic collations do, but a numeric
+("natural sort") collation does not, and returns nothing for the range. See
+[§6.4 of the specification](https://github.com/SrKleRAimBot/Idora/blob/main/spec/SPECIFICATION.md#64-range-bounds).
+
 A mistake in the arguments — an invalid prefix, an unregistered type, an undefined format, or a
 time before 1970 — is added to the query's errors, so the query fails instead of quietly matching
 everything or nothing.

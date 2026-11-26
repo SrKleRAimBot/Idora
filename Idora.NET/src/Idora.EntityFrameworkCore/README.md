@@ -182,8 +182,17 @@ have computed yourself — resuming a cursor from the last identifier a client s
 bounds come from [`IdoraId.LowerBound` and `IdoraId.UpperBound`](https://github.com/SrKleRAimBot/Idora/tree/main/Idora.NET#querying-by-creation-time).
 
 The range is meaningful for identifiers of one prefix and one format, which is what a key column
-holds. Any collation orders them correctly, case-sensitive or not, because the prefix is the same on
-every row and the value is lowercase.
+holds. The database compares them with the column's collation, and the range needs one that orders
+the digits before the lowercase letters, character by character. A binary collation guarantees it,
+and the usual linguistic ones agree too, case- and accent-insensitive ones included, because after
+the shared prefix an identifier holds only ASCII digits and lowercase letters. A **numeric**
+collation, such as a PostgreSQL ICU collation with `kn-true` (natural sort), compares a run of
+digits as one number, puts the lower bound after the upper one, and returns nothing. To be certain,
+give the key column a binary collation, for example on PostgreSQL:
+
+```csharp
+builder.Entity<Order>().Property(order => order.Id).UseCollation("C");
+```
 
 ---
 

@@ -487,6 +487,11 @@ strings, which is exactly what a column holding one entity type contains. A time
 after the year 10889 is outside what a 48-bit timestamp holds, and is an error rather than a
 silently clamped bound.
 
+The database compares them with the column's collation, which must order the digits before the lowercase
+letters character by character: binary and ordinary linguistic collations do, but a numeric
+("natural sort") collation does not, and returns nothing for the range. See
+[§6.4 of the specification](https://github.com/SrKleRAimBot/Idora/blob/main/spec/SPECIFICATION.md#64-range-bounds).
+
 ---
 
 ## What an identifier is made of

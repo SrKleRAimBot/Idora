@@ -23,9 +23,13 @@ namespace Microsoft.EntityFrameworkCore;
 /// <see cref="string.Compare(string, string)"/>, the form EF Core translates to SQL comparison
 /// operators; for an <see cref="IdoraId"/> column mapped by <c>UseIdoraIds</c> they use
 /// <see cref="IdoraId"/>'s own operators, which EF Core translates through the value converter. Either
-/// way the bounds are passed as parameters. In SQL the column's collation decides the comparison.
-/// Identifiers are lowercase ASCII after a prefix that is the same on every row, so any collation
-/// orders them correctly, case-sensitive or not.
+/// way the bounds are passed as parameters. In SQL the column's collation decides the comparison,
+/// and it must order the digits before the lowercase letters, character by character. A binary
+/// collation does, and so do the usual linguistic ones, case- and accent-insensitive ones included,
+/// because after the shared prefix an identifier holds only ASCII digits and lowercase letters. A
+/// numeric ("natural sort") collation does not: it puts the lower bound after the upper one, and
+/// the query returns nothing. Give the column a binary collation with <c>UseCollation</c> to be
+/// certain.
 /// </para>
 /// <para>
 /// The range is meaningful only for identifiers of one prefix and one format, which is the shape of

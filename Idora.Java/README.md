@@ -447,7 +447,10 @@ The lower bound is the timestamp characters followed by the smallest random fiel
 for ULID, `7000` `8000` `000000000000` for UUIDv7), the upper bound by the largest (`zzzzzzzzzzzzzzzz`,
 `7fff` `bfff` `ffffffffffff`). Both are themselves valid identifiers. They compare correctly against
 identifiers of the **same prefix and format** as plain strings, which is the shape of a database
-column holding one entity type; use a binary or `C` collation, as for any identifier column. An
+column holding one entity type. The column's collation must order the digits before the lowercase
+letters character by character: binary and ordinary linguistic collations do, but a numeric
+("natural sort") collation does not, and returns nothing for the range; a binary or `C` collation
+is the safe choice for any identifier column. An
 instant before 1970 or after the year 10889 (the 48-bit limit) throws `IllegalArgumentException`.
 
 ### Serialization

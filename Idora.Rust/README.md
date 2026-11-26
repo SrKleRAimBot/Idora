@@ -575,6 +575,11 @@ against identifiers of the same prefix and format — the shape of a database co
 UUIDv7s without their prefix. A time before 1970 or after the year 10889 is out of range and
 panics; the prefix is validated, as for `generate_with_prefix`.
 
+The database compares them with the column's collation, which must order the digits before the lowercase
+letters character by character: binary and ordinary linguistic collations do, but a numeric
+("natural sort") collation does not, and returns nothing for the range. See
+[§6.4 of the specification](https://github.com/SrKleRAimBot/Idora/blob/main/spec/SPECIFICATION.md#64-range-bounds).
+
 ### Typed identifiers
 
 `TypedId<E>` is an `Id` known, in the type system, to carry `E::PREFIX`. A function that takes a
@@ -990,6 +995,38 @@ The core's test and benchmark harnesses — including the JSON parser the confor
 are hand-written on `std`, so `cargo test -p idora` builds nothing but `idora`. The tests that need
 `serde_json`, `sqlx` or `tokio` live in `crates/idora-tests` instead, because a crate's
 dev-dependencies are always compiled for its tests.
+
+## Releasing
+
+Pushing an `Idora.Rust/v*` tag tests, packages and publishes every published crate in the
+workspace to crates.io, `idora` first and then the crates that depend on it. The tag must match the
+version in every crate's `Cargo.toml`:
+
+```bash
+git tag Idora.Rust/v1.1.0
+git push origin Idora.Rust/v1.1.0
+```
+
+Publishing uses crates.io [trusted publishing](https://crates.io/docs/trusted-publishing): the
+workflow exchanges a short-lived GitHub OIDC token for a crates.io token, so there is no long-lived
+secret to store. A version already on crates.io is skipped, so a release that stopped part-way can
+be finished by running the workflow again. Running it manually from the Actions tab is a dry run.
+
+### Releasing a new crate
+
+Trusted publishing is configured per crate, and crates.io accepts it only for a crate that already
+exists, so a new crate's first version is published by hand. The workflow checks every crate
+before it publishes anything, and stops with nothing published if one has never been released.
+For a new crate, here `idora-axum`:
+
+1. Bump every crate to the release version and push the tag. The workflow stops at the check.
+2. From the tagged commit, publish anything that is not yet on crates.io by hand, in order, with an
+   API token: `cargo publish -p idora` if this release's `idora` is not out yet, then
+   `cargo publish -p idora-axum`.
+3. On crates.io, open the new crate's settings and add a trusted publisher: repository
+   `SrKleRAimBot/Idora`, workflow `release-rust.yml`.
+4. Re-run the workflow. It finds every version already published, skips them, and creates the
+   GitHub release; every later release then runs from the tag alone.
 
 ## License
 

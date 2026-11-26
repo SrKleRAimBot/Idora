@@ -453,6 +453,11 @@ compare correctly against identifiers of the **same prefix and format** — the 
 column, which holds one entity type in one format. A time before 1970 or after the year 10889,
 the range a 48-bit timestamp covers, throws a `RangeError`.
 
+The database compares them with the column's collation, which must order the digits before the lowercase
+letters character by character: binary and ordinary linguistic collations do, but a numeric
+("natural sort") collation does not, and returns nothing for the range. See
+[§6.4 of the specification](https://github.com/SrKleRAimBot/Idora/blob/main/spec/SPECIFICATION.md#64-range-bounds).
+
 The [Drizzle integration](#integrations) wraps this up as `createdBetween(users.id, from, to)`.
 
 ---
@@ -730,6 +735,29 @@ dependency on `idora.js` is set to `^` that version, since that is the one it wa
 version already on npm is skipped, so a release that stopped part-way can be finished by running
 the workflow again. Running it manually from the Actions tab is a dry run: everything except the
 publish.
+
+A prerelease is published under the `next` dist-tag. A stable version becomes `latest` unless the
+package's `latest` is already newer — a fix released on an older line — in which case it goes under
+`maintenance-<major>.<minor>`, so a fresh `npm install` never moves backwards.
+
+### Releasing a new package
+
+npm configures trusted publishing per package, on the package's own settings page, which exists only
+once the package does. So a new package — when this was written, `idora.js-zod`,
+`idora.js-drizzle` and `idora.js-prisma` — has its first version published by hand. The workflow
+checks every package before it publishes anything, and stops with nothing published if one has
+never been released:
+
+1. Push the tag. The workflow stops at the check, with nothing published.
+2. From the tagged commit, with `npm login` as an owner, run `npm ci`. If the `package.json`
+   versions are not already the tag's, stamp them as the workflow's "Stamp the version from the
+   tag" step does, which also sets each extension's `idora.js` peer range. Then build with
+   `npm run build && npm run build --workspaces`, and publish each new package with
+   `npm publish -w extensions/<name> --access public`. That first version has no provenance.
+3. On npmjs.com, open each new package's settings and add a trusted publisher: GitHub Actions,
+   repository `SrKleRAimBot/Idora`, workflow `release-js.yml`.
+4. Re-run the workflow. It skips what is already published, publishes the rest, and every later
+   release runs from the tag alone.
 
 ## License
 

@@ -230,6 +230,12 @@ A package offers, in its own idiom:
 A ULID's timestamp is the first 10 characters decoded as Crockford Base32 (§3.1); a UUIDv7's is its
 first 12 hexadecimal characters. Neither depends on the clock or the time zone of the reader.
 
+The largest 48-bit timestamp falls in the year 10889. Where the language's instant type cannot
+reach that far (.NET's `DateTimeOffset` ends with the year 9999), the integer form **must** stay
+exact, and the package **must** document what the instant form gives for a later timestamp. It
+**should not** throw from reading it: no clock produces such an identifier, but anyone can type
+one, and parsing has already accepted it.
+
 ### 6.3 Equality and ordering
 
 Two parsed identifiers are **equal** when their texts are ordinally equal. Hashing follows equality.
@@ -281,6 +287,15 @@ validated as in §5.2.
 
 Range bounds compare correctly only against identifiers of the **same prefix and format**, as plain
 strings. That is the shape of a database column, which holds one entity type in one format.
+
+"As plain strings" means character by character, with the digits ordered before the lowercase
+letters, as an ordinal (byte) comparison orders them. A binary or `C` collation guarantees that.
+Ordinary linguistic collations agree for these strings too, case- and accent-insensitive ones
+included, because after the shared prefix an identifier holds only ASCII digits and lowercase
+letters. A **numeric** ("natural sort") collation does not: it compares a run of digits as one
+number, so for the millisecond `1` it puts the lower ULID bound `…00000000010000000000000000` after
+the upper bound `…0000000001zzzzzzzzzzzzzzzz`, and the range comes back empty. Packages that build
+range queries **must** document this requirement.
 
 ## 7. Errors
 
