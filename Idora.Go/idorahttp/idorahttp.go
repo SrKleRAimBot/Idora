@@ -98,11 +98,12 @@ var ErrMissingWildcard = errors.New("idorahttp: no such wildcard in the route pa
 // Bad Request (see [WithStatus] and [WithErrorHandler]) and never reaches next; a valid one is
 // stored in the request context, where [FromContext] finds it.
 //
-// It panics if prefix is not a valid prefix, since that is a mistake in the program, and is best
-// found when the routes are set up.
+// It panics with an error wrapping the [*idora.InvalidPrefixError] if prefix is not a valid
+// prefix, since that is a mistake in the program, and is best found when the routes are set up.
+// The prefix is not repeated beyond what that error quotes, which is kept short however long it is.
 func Require(name, prefix string, opts ...Option) func(http.Handler) http.Handler {
 	if err := idora.ValidatePrefix(prefix); err != nil {
-		panic(fmt.Sprintf("idorahttp: Require(%q, %q): %v", name, prefix, err))
+		panic(fmt.Errorf("idorahttp: Require(%q): %w", name, err))
 	}
 	return middleware(name, prefix, opts)
 }

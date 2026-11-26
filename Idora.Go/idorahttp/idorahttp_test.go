@@ -225,6 +225,20 @@ func TestConstructorsPanicOnProgrammingErrors(t *testing.T) {
 	idorahttp.RequireFor[Comment](gen, "id")
 }
 
+func TestRequirePanicsWithAShortErrorForAnEnormousPrefix(t *testing.T) {
+	defer func() {
+		err, _ := recover().(error)
+		var prefixErr *idora.InvalidPrefixError
+		if !errors.As(err, &prefixErr) {
+			t.Fatalf("Require panicked with %v, want an error wrapping *idora.InvalidPrefixError", err)
+		}
+		if n := len(err.Error()); n >= 1000 {
+			t.Errorf("a %d-byte panic message", n)
+		}
+	}()
+	idorahttp.Require("id", strings.Repeat("x", 1<<20))
+}
+
 func TestContext(t *testing.T) {
 	ctx := context.Background()
 	if _, ok := idorahttp.FromContext(ctx, "id"); ok {
