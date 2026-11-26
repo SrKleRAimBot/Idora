@@ -442,6 +442,25 @@ fn a_typed_id_is_copy_send_and_sync_whatever_its_entity() {
 }
 
 #[test]
+fn enormous_input_keeps_the_debug_output_short_as_main_prints_it() {
+    // `fn main() -> Result<(), E>` reports an error with {:?}, so Debug must be bounded too, for
+    // the error, its prefix cause, and the crate-wide Error wrapping it.
+    let huge = "x".repeat(1 << 20);
+    for text in [format!("usr_{huge}"), format!("{huge}_x")] {
+        let error = Id::parse(&text).unwrap_err();
+        for debug in [
+            format!("{error:?}"),
+            format!("{error:#?}"),
+            format!("{:?}", Error::from(error.clone())),
+        ] {
+            assert!(debug.len() < 1000, "a {}-byte Debug output", debug.len());
+            assert!(debug.contains("truncated"), "{debug}");
+        }
+        assert_eq!(error.text(), text, "the full text stays on the error");
+    }
+}
+
+#[test]
 fn enormous_input_keeps_every_message_in_the_chain_short() {
     // An identifier being parsed usually comes from a request, so a rejection must not repeat a
     // megabyte of it into a log line, including in the prefix error it carries as its source.

@@ -155,11 +155,23 @@ impl InvalidPrefixReason {
 ///      Prefixes may contain only ASCII letters and digits."
 /// );
 /// ```
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct InvalidPrefixError {
     prefix: String,
     reason: InvalidPrefixReason,
     declared_by: Option<&'static str>,
+}
+
+/// Written by hand so that `{:?}`, which is how `main` reports an error it returns, quotes the
+/// prefix shortened like the message does: it may be untrusted input of any length.
+impl fmt::Debug for InvalidPrefixError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InvalidPrefixError")
+            .field("prefix", &format_args!("{}", Quoted(&self.prefix)))
+            .field("reason", &self.reason)
+            .field("declared_by", &self.declared_by)
+            .finish()
+    }
 }
 
 impl InvalidPrefixError {
@@ -480,10 +492,21 @@ pub enum InvalidIdReason {
 ///      that the identifier refers to the right kind of entity."
 /// );
 /// ```
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct InvalidIdError {
     text: String,
     reason: InvalidIdReason,
+}
+
+/// Written by hand so that `{:?}`, which is how `main` reports an error it returns, quotes the
+/// text shortened like the message does: it is usually untrusted input, of any length.
+impl fmt::Debug for InvalidIdError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InvalidIdError")
+            .field("text", &format_args!("{}", Quoted(&self.text)))
+            .field("reason", &self.reason)
+            .finish()
+    }
 }
 
 impl InvalidIdError {
