@@ -20,6 +20,12 @@ on:
         default: '0.0.0-dryrun'
         type: string
 
+# One release at a time: what a publish does (which dist-tag, what to skip) depends on what is
+# already on npm, so two runs must not decide it at once.
+concurrency:
+  group: release-js
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -52,9 +58,13 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          # Passed as data, never interpolated into the script: a hand-typed dry-run version is
+          # validated below, and must not be able to run as shell before it is.
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
+            VERSION="$INPUT_VERSION"
           else
             VERSION="${GITHUB_REF_NAME#Idora.JS/v}"
           fi
@@ -159,9 +169,37 @@ jobs:
           name: npm-packages-${{ steps.version.outputs.version }}
           path: Idora.JS/*.tgz
 
+      - name: Check every package already exists on npm
+        # Trusted publishing is configured per package, on the package's own settings page, so a
+        # package that has never been published cannot be published from here. Checked before
+        # anything is published, so a release never puts idora.js on npm and then stops at an
+        # extension; see "Releasing a new package" in Idora.JS/README.md for the one-off setup.
+        if: github.event_name == 'push'
+        run: |
+          MISSING=""
+          for NAME in idora.js idora.js-zod idora.js-drizzle idora.js-prisma; do
+            if OUTPUT=$(npm view "$NAME" name 2>&1); then
+              continue
+            fi
+            if echo "$OUTPUT" | grep -q E404; then
+              MISSING="$MISSING $NAME"
+            else
+              echo "::error::could not ask npm about $NAME:"; echo "$OUTPUT"; exit 1
+            fi
+          done
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::never published to npm:$MISSING. Publish each once by hand and add this workflow as its trusted publisher (Idora.JS/README.md, \"Releasing a new package\"), then re-run. Nothing was published."
+            exit 1
+          fi
+
       - name: Publish to npm
-        # The irreversible step. Reachable only from an Idora.JS/v* tag push. A prerelease version
-        # is published under the "next" dist-tag so that it never becomes "latest".
+        # The irreversible step. Reachable only from an Idora.JS/v* tag push.
+        #
+        # Dist-tags: a prerelease goes to "next", so it never becomes "latest". A stable version
+        # goes to "latest" unless that package's "latest" is already newer — a fix released on an
+        # older line — in which case it goes to "maintenance-<major>.<minor>", so a fresh
+        # `npm install` never moves backwards.
         #
         # idora.js goes first, so an extension is never on npm before the idora.js it requires. A
         # version that is already published is skipped rather than failing the run, so a release
@@ -169,10 +207,6 @@ jobs:
         if: github.event_name == 'push'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          case "$VERSION" in
-            *-*) DIST_TAG=next ;;
-            *)   DIST_TAG=latest ;;
-          esac
 
           for NAME in idora.js idora.js-zod idora.js-drizzle idora.js-prisma; do
             if [ -n "$(npm view "$NAME@$VERSION" version 2>/dev/null)" ]; then
@@ -180,6 +214,17 @@ jobs:
               continue
             fi
 
+            LATEST=$(npm view "$NAME" dist-tags.latest 2>/dev/null || true)
+            DIST_TAG=$(node -e '
+              const [version, latest] = process.argv.slice(1);
+              const core = (v) => v.split("-")[0].split(".").map(Number);
+              const newer = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i]; return false; };
+              if (version.includes("-")) console.log("next");
+              else if (latest && newer(core(latest), core(version))) console.log(`maintenance-${core(version).slice(0, 2).join(".")}`);
+              else console.log("latest");
+            ' "$VERSION" "$LATEST")
+
+            echo "Publishing $NAME@$VERSION under the \"$DIST_TAG\" dist-tag (latest is ${LATEST:-unset})."
             npm publish "$NAME-$VERSION.tgz" --provenance --access public --tag "$DIST_TAG"
           done
 

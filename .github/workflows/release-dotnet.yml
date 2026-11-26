@@ -59,9 +59,13 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          # Passed as data, never interpolated into the script: a hand-typed dry-run version is
+          # validated below, and must not be able to run as shell before it is.
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
+            VERSION="$INPUT_VERSION"
           else
             VERSION="${GITHUB_REF_NAME#Idora.NET/v}"
           fi

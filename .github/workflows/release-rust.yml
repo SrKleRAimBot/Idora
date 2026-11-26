@@ -17,6 +17,11 @@ env:
   # In publish order. idora-tests is never published (publish = false).
   CRATES: idora idora-axum
 
+# One release at a time: what a publish skips depends on what is already on crates.io.
+concurrency:
+  group: release-rust
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -67,6 +72,31 @@ jobs:
         with:
           name: crates
           path: Idora.Rust/target/package/*.crate
+
+      - name: Check every crate already exists on crates.io
+        # Trusted publishing is configured per crate, and crates.io accepts it only for a crate that
+        # already exists, so a crate's first version has to be published by hand. Checked before
+        # anything is published, so a release never puts idora on crates.io and then stops at a
+        # crate that cannot be published from here; see "Releasing a new crate" in
+        # Idora.Rust/README.md for the one-off setup.
+        if: github.event_name == 'push'
+        run: |
+          MISSING=""
+          for crate in $CRATES; do
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H 'User-Agent: Idora release workflow (github.com/SrKleRAimBot/Idora)' \
+              "https://crates.io/api/v1/crates/$crate")
+            case "$STATUS" in
+              200) ;;
+              404) MISSING="$MISSING $crate" ;;
+              *) echo "::error::crates.io answered HTTP $STATUS for $crate; try again later"; exit 1 ;;
+            esac
+          done
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::never published to crates.io:$MISSING. Publish each once by hand and add this workflow as its trusted publisher (Idora.Rust/README.md, \"Releasing a new crate\"), then re-run. Nothing was published."
+            exit 1
+          fi
 
       - name: Authenticate with crates.io (OIDC, short-lived token)
         if: github.event_name == 'push'
