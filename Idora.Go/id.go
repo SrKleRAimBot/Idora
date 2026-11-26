@@ -119,11 +119,17 @@ func (id ID) SameMillisecond(other ID) bool { return id.ms == other.ms }
 // CreatedBefore reports whether the identifier was minted strictly before t, at millisecond
 // precision: t's sub-millisecond part is dropped before comparing, so an identifier is never
 // created before the millisecond it was minted in.
-func (id ID) CreatedBefore(t time.Time) bool { return int64(id.ms) < t.UnixMilli() }
+//
+// It compares instants rather than t.UnixMilli(), which overflows for a t far enough from the
+// epoch: minted before t's millisecond is the same as t being at or after the next millisecond.
+func (id ID) CreatedBefore(t time.Time) bool { return !t.Before(time.UnixMilli(int64(id.ms) + 1)) }
 
 // CreatedAfter reports whether the identifier was minted strictly after t, at millisecond
 // precision: t's sub-millisecond part is dropped before comparing.
-func (id ID) CreatedAfter(t time.Time) bool { return int64(id.ms) > t.UnixMilli() }
+//
+// Like [ID.CreatedBefore], it compares instants, so a t of any magnitude is safe: minted after
+// t's millisecond is the same as t falling before the identifier's own.
+func (id ID) CreatedAfter(t time.Time) bool { return t.Before(time.UnixMilli(int64(id.ms))) }
 
 // MarshalText implements [encoding.TextMarshaler]. The text is the identifier itself, and empty
 // for the zero ID.

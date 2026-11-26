@@ -183,6 +183,26 @@ func TestCreatedBeforeAndAfterTruncateToTheMillisecond(t *testing.T) {
 	}
 }
 
+func TestCreatedBeforeAndAfterHoldForTimesFarFromTheEpoch(t *testing.T) {
+	// t.UnixMilli() overflows int64 for these, which once made an epoch identifier report being
+	// created after a time hundreds of millions of years in the future.
+	for _, text := range []string{"ord_00000000000000000000000000", ulidText, "x_7zzzzzzzzzzzzzzzzzzzzzzzzz"} {
+		id := idora.MustParse(text)
+		future := []time.Time{time.Unix(10_000_000_000_000_000, 0), time.Unix(1<<62, 999_999_999)}
+		past := []time.Time{time.Unix(-10_000_000_000_000_000, 0), time.Unix(-1<<62, 0), {}}
+		for _, at := range future {
+			if !id.CreatedBefore(at) || id.CreatedAfter(at) {
+				t.Errorf("%s: CreatedBefore(%v) = %v, CreatedAfter = %v; want true, false", text, at, id.CreatedBefore(at), id.CreatedAfter(at))
+			}
+		}
+		for _, at := range past {
+			if id.CreatedBefore(at) || !id.CreatedAfter(at) {
+				t.Errorf("%s: CreatedBefore(%v) = %v, CreatedAfter = %v; want false, true", text, at, id.CreatedBefore(at), id.CreatedAfter(at))
+			}
+		}
+	}
+}
+
 func TestHasPrefixIsExact(t *testing.T) {
 	id := idora.MustParse(ulidText)
 	for p, want := range map[string]bool{"usr": true, "USR": false, "us": false, "usr_": false, "": false} {
