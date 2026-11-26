@@ -310,7 +310,10 @@ apart, sharing a common base where the language has one:
 | entity prefix not registered | §5.1 or §5.3 for an unregistered type | the entity type |
 | invalid identifier | §6.1 fails | the text, the reason (`noSeparator`, `prefix`, `value`, `prefixMismatch`) and, for `prefixMismatch`, the expected prefix |
 
-Messages say what went wrong **and how to fix it**.
+Messages say what went wrong **and how to fix it**. Parsing hands untrusted input to the same
+errors, so a message **must not** repeat input of unbounded length: quote at most the first 64
+characters of a rejected text or prefix, anywhere in the error, including a wrapped cause. The
+error's own properties keep the full text.
 
 *Invalid identifier* was added after the first release, and a package **must not** let it break code
 written against that release. Where the common base is a closed hierarchy that callers may match

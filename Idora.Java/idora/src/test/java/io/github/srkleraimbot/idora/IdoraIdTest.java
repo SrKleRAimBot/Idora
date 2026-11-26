@@ -598,4 +598,26 @@ class IdoraIdTest {
         }
         throw new AssertionError("not found in the stream: " + needle);
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"value", "prefix", "noSeparator"})
+    void parse_enormousInput_keepsEveryMessageInTheChainShort(String enormousPart) {
+        // Arrange: an identifier being parsed usually comes from a request, so a rejection must not
+        // repeat a megabyte of it into a log line, including in the prefix exception it wraps.
+        String huge = "x".repeat(1 << 20);
+        String text = switch (enormousPart) {
+            case "value" -> "usr_" + huge;
+            case "prefix" -> huge + "_x";
+            default -> huge;
+        };
+
+        // Act
+        InvalidIdException exception = assertThrows(InvalidIdException.class, () -> IdoraId.parse(text));
+
+        // Assert
+        assertEquals(text, exception.getText());
+        for (Throwable e = exception; e != null; e = e.getCause()) {
+            assertTrue(e.getMessage().length() < 1000, e.getClass().getSimpleName() + " message is " + e.getMessage().length());
+        }
+    }
 }

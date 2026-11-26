@@ -553,4 +553,31 @@ public sealed class IdoraIdParsingTests
     private static bool TryParseSpanGenerically<T>(ReadOnlySpan<char> text, out T result)
         where T : ISpanParsable<T> =>
         T.TryParse(text, provider: null, out result!);
+
+    [Theory]
+    [InlineData("value")]
+    [InlineData("prefix")]
+    [InlineData("noSeparator")]
+    public void Parse_EnormousInput_KeepsEveryMessageInTheChainShort(string enormousPart)
+    {
+        // Arrange: an identifier being parsed usually comes from a request, so a rejection must not
+        // repeat a megabyte of it into a log line, including in the prefix exception it wraps.
+        string huge = new('x', 1 << 20);
+        string text = enormousPart switch
+        {
+            "value" => "usr_" + huge,
+            "prefix" => huge + "_x",
+            _ => huge,
+        };
+
+        // Act
+        InvalidIdException exception = Should.Throw<InvalidIdException>(() => IdoraId.Parse(text));
+
+        // Assert
+        exception.Text.ShouldBe(text);
+        for (Exception? e = exception; e is not null; e = e.InnerException)
+        {
+            e.Message.Length.ShouldBeLessThan(1000);
+        }
+    }
 }

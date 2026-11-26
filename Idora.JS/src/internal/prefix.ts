@@ -36,7 +36,8 @@ export function validatePrefix(prefix: unknown, parameterName: string): asserts 
 
   if (prefix.length > MAX_PREFIX_LENGTH) {
     throw new InvalidEntityPrefixError(
-      `The entity prefix '${prefix}' is ${prefix.length} characters long; the maximum is ${MAX_PREFIX_LENGTH}.`,
+      // Shortened, because a prefix being parsed out of an identifier is untrusted input of any length.
+      `The entity prefix '${prefix.length <= 64 ? prefix : `${prefix.slice(0, 63)}…`}' is ${prefix.length} characters long; the maximum is ${MAX_PREFIX_LENGTH}.`,
       prefix,
       'tooLong',
     );

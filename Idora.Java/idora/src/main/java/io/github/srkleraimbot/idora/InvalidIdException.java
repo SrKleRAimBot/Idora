@@ -152,7 +152,7 @@ public final class InvalidIdException extends IllegalArgumentException {
      * Quotes a rejected text for a message: escaped, so that input cannot forge log lines, and
      * shortened, so that an enormous input does not become an enormous message.
      */
-    private static String quote(String text) {
+    static String quote(String text) {
         StringBuilder quoted = new StringBuilder(Math.min(text.length(), QUOTED_LENGTH) + 16).append('\'');
         int shown = Math.min(text.length(), QUOTED_LENGTH);
         for (int i = 0; i < shown; i++) {

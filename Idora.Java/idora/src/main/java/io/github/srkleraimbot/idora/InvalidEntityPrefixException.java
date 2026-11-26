@@ -111,7 +111,8 @@ public final class InvalidEntityPrefixException extends IdoraException {
 
     static InvalidEntityPrefixException tooLong(String prefix) {
         return new InvalidEntityPrefixException(
-                "The entity prefix '" + prefix + "' is " + prefix.length() + " characters long; the maximum is "
+                // Quoted shortened: a prefix parsed out of an identifier is untrusted input of any length.
+                "The entity prefix " + InvalidIdException.quote(prefix) + " is " + prefix.length() + " characters long; the maximum is "
                         + EntityPrefixValidator.MAX_LENGTH + ". Use a shorter abbreviation of ASCII letters "
                         + "or digits, for example \"usr\".",
                 prefix,

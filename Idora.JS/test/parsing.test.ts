@@ -380,3 +380,30 @@ function captureInvalid(action: () => unknown): InvalidIdError {
 
   assert.fail('expected an InvalidIdError');
 }
+
+describe('rejecting enormous input', () => {
+  // An identifier being parsed usually comes from a request, so a rejection must not repeat a
+  // megabyte of it into a log line — including in the prefix error attached as the cause.
+  for (const [name, text] of [
+    ['an enormous value', `usr_${'x'.repeat(1 << 20)}`],
+    ['an enormous prefix', `${'u'.repeat(1 << 20)}_x`],
+    ['enormous text with no separator', 'u'.repeat(1 << 20)],
+  ] as const) {
+    it(`keeps every message short for ${name}`, () => {
+      // Act
+      let error: unknown;
+      try {
+        IdoraId.parse(text);
+      } catch (caught) {
+        error = caught;
+      }
+
+      // Assert
+      assert.ok(error instanceof InvalidIdError);
+      assert.equal(error.text, text, 'the full text stays on the error');
+      for (let e: unknown = error; e instanceof Error; e = e.cause) {
+        assert.ok(e.message.length < 1000, `${e.name} has a ${e.message.length}-character message`);
+      }
+    });
+  }
+});

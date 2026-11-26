@@ -212,10 +212,12 @@ impl fmt::Display for InvalidPrefixError {
                 "An entity prefix cannot be empty. Supply 1 to {MAX_PREFIX_LEN} ASCII letters or \
                  digits, for example \"usr\"."
             ),
+            // Quoted shortened: a prefix parsed out of an identifier is untrusted input of any length.
             InvalidPrefixReason::TooLong { len } => write!(
                 f,
-                "The entity prefix '{prefix}' is {len} characters long; the maximum is \
-                 {MAX_PREFIX_LEN}. Use a shorter abbreviation."
+                "The entity prefix {quoted} is {len} characters long; the maximum is \
+                 {MAX_PREFIX_LEN}. Use a shorter abbreviation.",
+                quoted = Quoted(prefix)
             ),
             InvalidPrefixReason::Separator { index } => write!(
                 f,

@@ -416,3 +416,20 @@ fn a_typed_id_is_copy_send_and_sync_whatever_its_entity() {
     assert_traits::<Id>();
     assert_eq!(size_of::<TypedId<Unshareable>>(), size_of::<Id>());
 }
+
+#[test]
+fn enormous_input_keeps_every_message_in_the_chain_short() {
+    // An identifier being parsed usually comes from a request, so a rejection must not repeat a
+    // megabyte of it into a log line, including in the prefix error it carries as its source.
+    let huge = "x".repeat(1 << 20);
+    for text in [format!("usr_{huge}"), format!("{huge}_x"), huge] {
+        let error = Id::parse(&text).unwrap_err();
+        assert_eq!(error.text(), text);
+        let mut current: Option<&dyn std::error::Error> = Some(&error);
+        while let Some(e) = current {
+            let len = e.to_string().len();
+            assert!(len < 1000, "a {len}-byte message");
+            current = e.source();
+        }
+    }
+}

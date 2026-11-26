@@ -535,3 +535,21 @@ func TestBoundsReject(t *testing.T) {
 		t.Errorf("LowerBoundValue(epoch) = %q, %v", v, err)
 	}
 }
+
+func TestEnormousInputKeepsEveryMessageInTheChainShort(t *testing.T) {
+	// An identifier being parsed usually comes from a request, so a rejection must not repeat a
+	// megabyte of it into a log line, including in the prefix error it wraps.
+	huge := strings.Repeat("x", 1<<20)
+	for _, text := range []string{"usr_" + huge, huge + "_x", huge} {
+		_, err := idora.Parse(text)
+		var invalid *idora.InvalidIDError
+		if !errors.As(err, &invalid) || invalid.Text != text {
+			t.Fatalf("want an *InvalidIDError carrying the full text, got %T", err)
+		}
+		for e := err; e != nil; e = errors.Unwrap(e) {
+			if n := len(e.Error()); n >= 1000 {
+				t.Errorf("%T has a %d-byte message", e, n)
+			}
+		}
+	}
+}

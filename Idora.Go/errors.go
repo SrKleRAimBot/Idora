@@ -102,8 +102,9 @@ func (e *InvalidPrefixError) detail() string {
 		return fmt.Sprintf("an entity prefix cannot be empty; supply 1 to %d ASCII letters or digits, "+
 			"for example \"usr\"", MaxPrefixLen)
 	case ReasonTooLong:
-		return fmt.Sprintf("the entity prefix %q is %d characters long; the maximum is %d, so shorten it",
-			e.Prefix, e.Length, MaxPrefixLen)
+		// The prefix may be untrusted input, from an identifier being parsed, of any length.
+		return fmt.Sprintf("the entity prefix %s is %d characters long; the maximum is %d, so shorten it",
+			quoteText(e.Prefix), e.Length, MaxPrefixLen)
 	case ReasonSeparator:
 		return fmt.Sprintf("the entity prefix %q contains the separator %q at index %d; the separator "+
 			"divides the prefix from the value, so a prefix cannot contain one", e.Prefix, e.Char, e.Index)
@@ -318,7 +319,8 @@ func valueProblem(v string) string {
 		if strings.ContainsRune(v, '-') {
 			hint = ", and hyphens are not accepted"
 		}
-		return fmt.Sprintf("the value %q has a length of %d; %s%s", v, len(v), formats, hint)
+		// Any length gets here, so the value is quoted shortened: it is untrusted input.
+		return fmt.Sprintf("the value %s has a length of %d; %s%s", quoteText(v), len(v), formats, hint)
 	}
 }
 

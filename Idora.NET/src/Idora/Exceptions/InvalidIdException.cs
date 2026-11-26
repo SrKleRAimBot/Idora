@@ -161,6 +161,6 @@ public sealed class InvalidIdException : IdoraException
             expectedPrefix);
 
     /// <summary>Shortens over-long text for quoting in a message, leaving the property untouched.</summary>
-    private static string Quote(string text) =>
+    internal static string Quote(string text) =>
         text.Length <= MaxQuotedLength ? text : string.Concat(text.AsSpan(0, MaxQuotedLength), "…");
 }

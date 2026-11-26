@@ -95,7 +95,8 @@ internal static class EntityPrefixValidator
                 string.Format(
                     CultureInfo.InvariantCulture,
                     "The entity prefix '{0}' is {1} characters long; the maximum is {2}.",
-                    prefix,
+                    // Shortened: a prefix parsed out of an identifier is untrusted input of any length.
+                    InvalidIdException.Quote(prefix),
                     prefix.Length,
                     MaxLength),
                 prefix);
