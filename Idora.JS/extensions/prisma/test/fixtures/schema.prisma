@@ -1,0 +1,17 @@
+// The schema the README documents, generated into a real Prisma Client by `npm run generate:test`
+// so that the README's calls are type-checked against Prisma's own generated types. Keep the User
+// model identical to the README's.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id    String @id @default(dbgenerated()) @db.VarChar(30)
+  email String @unique
+}

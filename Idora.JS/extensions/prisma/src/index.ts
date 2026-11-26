@@ -61,12 +61,15 @@ interface ModelIds {
  * user.id; // 'usr_01k2f9v8ta7m3x0qbrn4dzeh5c'
  * ```
  *
- * In the schema, the field is a plain string with no `@default`: the identifier is generated in
- * your process, by the same generator as the rest of your application, before the query is sent.
+ * In the schema, mark the field `@default(dbgenerated())`. The identifier is generated in your
+ * process, before the query is sent, but without a `@default` Prisma's generated types require
+ * `id` in every create. `dbgenerated()` with no argument makes it optional there and adds no
+ * `DEFAULT` to the column, so a create that bypasses the extension fails on the NOT NULL key
+ * rather than storing something else.
  *
  * ```prisma
  * model User {
- *   id    String @id @db.VarChar(30)
+ *   id    String @id @default(dbgenerated()) @db.VarChar(30)
  *   email String @unique
  * }
  * ```
@@ -83,7 +86,7 @@ interface ModelIds {
  * @throws {InvalidEntityPrefixError} A model names a prefix that is not valid.
  * @throws {TypeError} The options have the wrong shape, or two keys name the same model.
  */
-export function idoraExtension(options: IdoraExtensionOptions): ReturnType<typeof Prisma.defineExtension> {
+export function idoraExtension(options: IdoraExtensionOptions) {
   const models = resolveModels(options);
   const lookup = (model: string): ModelIds | undefined => models.get(clientName(model));
 

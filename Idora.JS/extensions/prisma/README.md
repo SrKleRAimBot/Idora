@@ -40,15 +40,26 @@ is an ES module with TypeScript declarations included.
 
 ## The schema
 
-The identifier field is a plain string, with no `@default` — it is generated in your process,
-before the query is sent:
+The identifier is generated in your process, before the query is sent, but the field still needs
+`@default(dbgenerated())`:
 
 ```prisma
 model User {
-  id    String @id @db.VarChar(30)
+  id    String @id @default(dbgenerated()) @db.VarChar(30)
   email String @unique
 }
 ```
+
+Prisma's generated types make a field optional in `create`, `createMany` and `upsert` only when
+it has a `@default`. Without one, `prisma.user.create({ data: { email } })` does not compile:
+`UserCreateInput` requires `id`, and the extension never gets the chance to fill it in.
+`dbgenerated()` with no argument is the default that says "the value comes from elsewhere": it
+makes `id` optional in the client's types and puts no `DEFAULT` on the column. Prisma Migrate
+emits exactly the DDL it would for a plain `String @id` on PostgreSQL, MySQL and SQLite, so a
+create that somehow bypasses the extension fails on the `NOT NULL` key instead of storing a value
+you did not choose.
+
+The package's own tests generate a client from this schema and type-check these calls against it.
 
 Every identifier for one entity type has the same length — the prefix, the separator, and a
 26-character ULID or 32-character UUIDv7 — so `@db.VarChar(30)` suits a three-letter prefix with

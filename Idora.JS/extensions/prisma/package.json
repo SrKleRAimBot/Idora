@@ -42,8 +42,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "build:test": "tsc -p tsconfig.test.json",
-    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "generate:test": "prisma generate --schema test/fixtures/schema.prisma",
+    "build:test": "npm run generate:test && tsc -p tsconfig.test.json",
+    "typecheck": "npm run generate:test && tsc -p tsconfig.test.json --noEmit",
     "test": "npm run build:test && node --test build/test/*.test.js",
     "prepack": "npm run build"
   },
@@ -55,6 +56,7 @@
     "@prisma/client": "7.10.1",
     "@types/node": "22.20.5",
     "idora.js": "file:../..",
+    "prisma": "7.10.1",
     "typescript": "7.0.2"
   }
 }
