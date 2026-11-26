@@ -275,9 +275,33 @@ fn the_prefix_error_is_the_source_and_the_umbrella_error_keeps_the_chain() {
 }
 
 #[test]
-fn an_invalid_expected_prefix_can_never_match() {
-    let error = Id::parse_with_prefix(USER_ID, "us_r").unwrap_err();
-    assert_eq!(error.expected_prefix(), Some("us_r"));
+fn an_invalid_expected_prefix_panics_whatever_the_text_with_a_short_message() {
+    // A mistake in the calling code, reported as such rather than as the identifier's fault, and
+    // kept short: a megabyte-long prefix must not become a megabyte-long panic message.
+    let huge = "p".repeat(1 << 20);
+    for expected in ["us_r", "", huge.as_str()] {
+        for text in [USER_ID, "nonsense"] {
+            for check in [
+                (|t: &str, e: &str| {
+                    let _ = Id::parse_with_prefix(t, e);
+                }) as fn(&str, &str),
+                |t, e| {
+                    let _ = Id::is_valid_with_prefix(t, e);
+                },
+            ] {
+                let payload = std::panic::catch_unwind(|| check(text, expected)).unwrap_err();
+                let message = payload
+                    .downcast_ref::<String>()
+                    .expect("a formatted panic message");
+                assert!(message.contains("entity prefix"), "{message}");
+                assert!(
+                    message.len() < 1000,
+                    "a {}-byte panic message",
+                    message.len()
+                );
+            }
+        }
+    }
 }
 
 #[test]

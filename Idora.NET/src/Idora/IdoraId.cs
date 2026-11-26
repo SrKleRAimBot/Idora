@@ -297,10 +297,14 @@ public readonly struct IdoraId :
     /// IdoraId userId = IdoraId.Parse(route, expectedPrefix: "usr");
     /// </code>
     /// </example>
+    /// <exception cref="InvalidEntityPrefixException">
+    /// <paramref name="expectedPrefix"/> is not a valid prefix. That is a mistake in the calling code,
+    /// not in the input, so it is reported whatever the text holds.
+    /// </exception>
     public static IdoraId Parse(string text, string expectedPrefix)
     {
         ArgumentNullException.ThrowIfNull(text);
-        ArgumentNullException.ThrowIfNull(expectedPrefix);
+        EntityPrefixValidator.Validate(expectedPrefix, nameof(expectedPrefix));
 
         return TryParseCore(text, expectedPrefix, out int separatorIndex, out long timestampMs) is { } failure
             ? throw CreateException(text, expectedPrefix, failure, separatorIndex)
@@ -334,9 +338,13 @@ public readonly struct IdoraId :
     /// <paramref name="text"/> is not a valid identifier, or its prefix is not
     /// <paramref name="expectedPrefix"/>.
     /// </exception>
+    /// <exception cref="InvalidEntityPrefixException">
+    /// <paramref name="expectedPrefix"/> is not a valid prefix. That is a mistake in the calling code,
+    /// not in the input, so it is reported whatever the text holds.
+    /// </exception>
     public static IdoraId Parse(ReadOnlySpan<char> text, string expectedPrefix)
     {
-        ArgumentNullException.ThrowIfNull(expectedPrefix);
+        EntityPrefixValidator.Validate(expectedPrefix, nameof(expectedPrefix));
 
         return TryParseCore(text, expectedPrefix, out int separatorIndex, out long timestampMs) is { } failure
             ? throw CreateException(text.ToString(), expectedPrefix, failure, separatorIndex)
@@ -385,9 +393,13 @@ public readonly struct IdoraId :
     /// <paramref name="expectedPrefix"/> is <see langword="null"/>. That is a mistake in the calling
     /// code, not in the input, so it is not reported as a <see langword="false"/>.
     /// </exception>
+    /// <exception cref="InvalidEntityPrefixException">
+    /// <paramref name="expectedPrefix"/> is not a valid prefix. That is a mistake in the calling code,
+    /// not in the input, so it is reported whatever the text holds.
+    /// </exception>
     public static bool TryParse([NotNullWhen(true)] string? text, string expectedPrefix, out IdoraId id)
     {
-        ArgumentNullException.ThrowIfNull(expectedPrefix);
+        EntityPrefixValidator.Validate(expectedPrefix, nameof(expectedPrefix));
 
         if (text is not null
             && TryParseCore(text, expectedPrefix, out int separatorIndex, out long timestampMs) is null)
@@ -431,9 +443,13 @@ public readonly struct IdoraId :
     /// <paramref name="expectedPrefix"/>.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="expectedPrefix"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidEntityPrefixException">
+    /// <paramref name="expectedPrefix"/> is not a valid prefix. That is a mistake in the calling code,
+    /// not in the input, so it is reported whatever the text holds.
+    /// </exception>
     public static bool TryParse(ReadOnlySpan<char> text, string expectedPrefix, out IdoraId id)
     {
-        ArgumentNullException.ThrowIfNull(expectedPrefix);
+        EntityPrefixValidator.Validate(expectedPrefix, nameof(expectedPrefix));
 
         if (TryParseCore(text, expectedPrefix, out int separatorIndex, out long timestampMs) is null)
         {
@@ -463,9 +479,13 @@ public readonly struct IdoraId :
     /// <paramref name="expectedPrefix"/>.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="expectedPrefix"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidEntityPrefixException">
+    /// <paramref name="expectedPrefix"/> is not a valid prefix. That is a mistake in the calling code,
+    /// not in the input, so it is reported whatever the text holds.
+    /// </exception>
     public static bool IsValid([NotNullWhen(true)] string? text, string expectedPrefix)
     {
-        ArgumentNullException.ThrowIfNull(expectedPrefix);
+        EntityPrefixValidator.Validate(expectedPrefix, nameof(expectedPrefix));
 
         return text is not null && TryParseCore(text, expectedPrefix, out _, out _) is null;
     }
@@ -489,9 +509,13 @@ public readonly struct IdoraId :
     /// <paramref name="expectedPrefix"/>.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="expectedPrefix"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidEntityPrefixException">
+    /// <paramref name="expectedPrefix"/> is not a valid prefix. That is a mistake in the calling code,
+    /// not in the input, so it is reported whatever the text holds.
+    /// </exception>
     public static bool IsValid(ReadOnlySpan<char> text, string expectedPrefix)
     {
-        ArgumentNullException.ThrowIfNull(expectedPrefix);
+        EntityPrefixValidator.Validate(expectedPrefix, nameof(expectedPrefix));
 
         return TryParseCore(text, expectedPrefix, out _, out _) is null;
     }

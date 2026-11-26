@@ -26,6 +26,10 @@ func Parse(s string) (ID, error) { return parse(s, "", false) }
 // checks of Parse it returns an [*InvalidIDError] with [ReasonPrefixMismatch] unless the prefix
 // is exactly prefix: an ordinal comparison, case included, so "USR_…" does not match "usr".
 //
+// prefix is checked first, with [ValidatePrefix]: an invalid one returns that
+// [*InvalidPrefixError] whatever s holds, since the mistake is the caller's, not the
+// identifier's.
+//
 // Where the prefix belongs to a registered entity type, [ParseFor] keeps it in one place.
 func ParsePrefixed(s, prefix string) (ID, error) { return parse(s, prefix, true) }
 
@@ -48,7 +52,14 @@ func IsValid(s string) bool {
 
 // IsValidPrefixed reports whether s is a valid identifier whose prefix is exactly prefix:
 // whether [ParsePrefixed] would succeed. It does not allocate.
+//
+// It panics with the [*InvalidPrefixError] if prefix itself is invalid, as [IsValidFor] does for
+// an unregistered type: that is a mistake in the calling code, which a false would hide by
+// rejecting every identifier.
 func IsValidPrefixed(s, prefix string) bool {
+	if err := validatePrefix(prefix); err != nil {
+		panic(err)
+	}
 	id, ok := scan(s)
 	return ok && id.Prefix() == prefix
 }
@@ -121,6 +132,11 @@ func (g *Generator) GenerateIDFor(t reflect.Type) (ID, error) {
 // parse applies the rules of spec §6.1 in order. When check is true the prefix must equal
 // expected.
 func parse(s, expected string, check bool) (ID, error) {
+	if check {
+		if err := validatePrefix(expected); err != nil {
+			return ID{}, err
+		}
+	}
 	id, ok := scan(s)
 	if !ok {
 		return ID{}, diagnose(s)

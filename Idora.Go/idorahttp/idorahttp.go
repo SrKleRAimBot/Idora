@@ -41,7 +41,8 @@ import (
 )
 
 // PathID parses the path wildcard name of r as an identifier whose prefix is exactly prefix,
-// with [idora.ParsePrefixed]. An absent or malformed value returns an [*idora.InvalidIDError].
+// with [idora.ParsePrefixed]. An absent or malformed value returns an [*idora.InvalidIDError],
+// and an invalid prefix an [*idora.InvalidPrefixError].
 func PathID(r *http.Request, name, prefix string) (idora.ID, error) {
 	return idora.ParsePrefixed(r.PathValue(name), prefix)
 }

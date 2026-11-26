@@ -57,6 +57,12 @@ impl<E: Entity> TypedId<E> {
     /// # Errors
     ///
     /// As [`Id::parse_with_prefix`] with `E::PREFIX` as the expected prefix.
+    ///
+    /// # Panics
+    ///
+    /// If `E::PREFIX` is not a valid prefix, which [`entity!`](crate::entity) rules out at compile
+    /// time; only a hand-written [`Entity`] implementation can declare one.
+    #[track_caller]
     pub fn parse(text: &str) -> Result<Self, InvalidIdError> {
         Id::parse_with_prefix(text, E::PREFIX).map(Self::new_unchecked)
     }

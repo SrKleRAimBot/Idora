@@ -86,6 +86,15 @@ enum Fault {
     PrefixMismatch,
 }
 
+/// Panics, at the caller's location, if an expected prefix the caller passed is not itself valid.
+/// The message is bounded however long the prefix: [`InvalidPrefixError`] quotes it shortened.
+#[track_caller]
+fn expect_valid_prefix(expected: &str) {
+    if let Err(error) = crate::validate_prefix(expected) {
+        panic!("{error}");
+    }
+}
+
 /// The whole of §6.1, rules 2 to 5, in order. Never allocates.
 #[inline]
 fn check(text: &str, expected: Option<&str>) -> Result<Id, Fault> {
@@ -171,7 +180,14 @@ impl Id {
     /// Parses an identifier that must carry exactly the prefix `expected`, case included.
     ///
     /// For a prefix that belongs to a registered type, [`Idora::parse`](crate::Idora::parse) looks
-    /// it up for you. An `expected` prefix that is not itself valid can never match.
+    /// it up for you.
+    ///
+    /// # Panics
+    ///
+    /// If `expected` is not itself a valid prefix (see [`validate_prefix`](crate::validate_prefix)),
+    /// whatever `text` holds. That is a mistake in the calling code rather than in the input, and an
+    /// error would be reported as the identifier's fault; Idora.NET, Idora.JS and Idora.Java throw
+    /// for it, and Idora.Go's boolean check panics.
     ///
     /// # Errors
     ///
@@ -188,7 +204,9 @@ impl Id {
     /// assert_eq!(error.expected_prefix(), Some("usr"));
     /// assert!(matches!(error.reason(), InvalidIdReason::PrefixMismatch { .. }));
     /// ```
+    #[track_caller]
     pub fn parse_with_prefix(text: &str, expected: &str) -> Result<Self, InvalidIdError> {
+        expect_valid_prefix(expected);
         check(text, Some(expected)).map_err(|fault| fault.into_error(text, Some(expected)))
     }
 
@@ -212,8 +230,16 @@ impl Id {
     /// assert!(Id::is_valid_with_prefix("ord_01k226e0g1zzqdvk5vnacrgxv6", "ord"));
     /// assert!(!Id::is_valid_with_prefix("ord_01k226e0g1zzqdvk5vnacrgxv6", "usr"));
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// If `expected` is not itself a valid prefix, as for
+    /// [`parse_with_prefix`](Self::parse_with_prefix): a `false` would hide the mistake by
+    /// rejecting every identifier.
     #[must_use]
+    #[track_caller]
     pub fn is_valid_with_prefix(text: &str, expected: &str) -> bool {
+        expect_valid_prefix(expected);
         check(text, Some(expected)).is_ok()
     }
 

@@ -221,13 +221,33 @@ func TestParsePrefixed(t *testing.T) {
 	if !errors.As(err, &invalid) || invalid.Reason != idora.ReasonPrefixMismatch || invalid.ExpectedPrefix != "USR" {
 		t.Errorf("case-different prefix: %v", err)
 	}
-	// An invalid expected prefix cannot match anything; the identifier's own checks come first.
-	if _, err := idora.ParsePrefixed(ulidText, "us_r"); !errors.As(err, &invalid) || invalid.Reason != idora.ReasonPrefixMismatch {
-		t.Errorf("invalid expected prefix: %v", err)
+	// An invalid expected prefix is the caller's mistake, reported as such whatever the text holds,
+	// and kept short: a megabyte of it must not become a megabyte of message.
+	for _, bad := range []string{"us_r", "", strings.Repeat("p", 1<<20)} {
+		for _, text := range []string{ulidText, "nonsense"} {
+			_, err := idora.ParsePrefixed(text, bad)
+			var prefixErr *idora.InvalidPrefixError
+			if !errors.As(err, &prefixErr) || errors.As(err, &invalid) {
+				t.Errorf("ParsePrefixed(%q, invalid prefix of length %d) = %T; want *InvalidPrefixError", text, len(bad), err)
+			} else if len(err.Error()) >= 1000 {
+				t.Errorf("a %d-byte message for an invalid expected prefix", len(err.Error()))
+			}
+		}
 	}
 	if _, err := idora.ParsePrefixed("usr_x", "ord"); !errors.As(err, &invalid) || invalid.Reason != idora.ReasonValue {
 		t.Errorf("bad value is reported before a mismatch: %v", err)
 	}
+}
+
+func TestIsValidPrefixedPanicsForAnInvalidPrefix(t *testing.T) {
+	defer func() {
+		var prefixErr *idora.InvalidPrefixError
+		if err, _ := recover().(error); !errors.As(err, &prefixErr) {
+			t.Errorf("recovered %v; want an *InvalidPrefixError", err)
+		}
+	}()
+	idora.IsValidPrefixed(ulidText, "us_r")
+	t.Error("IsValidPrefixed returned for an invalid prefix")
 }
 
 func TestMustParsePanicsWithTheError(t *testing.T) {

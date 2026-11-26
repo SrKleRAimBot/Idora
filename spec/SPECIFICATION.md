@@ -208,6 +208,13 @@ the first failure is reported:
 5. **Prefix mismatch** (`prefixMismatch`) — only when the caller asked for a particular prefix: the
    parsed prefix is not **exactly** (ordinally, case included) the prefix expected.
 
+An expected prefix comes from the caller, not from the input, so it is checked before any of these,
+against §2. An invalid one fails as *invalid entity prefix*, whatever the text holds, and from every
+form below, the non-failing parse and the validity check included: answering "not valid" would
+blame every identifier for a mistake in the calling code. Where a language reports such a mistake
+by panicking rather than with a value it returns (Idora.Rust's typed result, Idora.Go's boolean
+check), it panics with that error.
+
 A package offers, in its own idiom:
 
 - a **failing parse** that raises *invalid identifier* (§7), optionally taking an expected prefix;

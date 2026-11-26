@@ -155,7 +155,7 @@ public sealed class InvalidIdException : IdoraException
                 + "identifies a different kind of entity; prefixes are compared exactly, including case.",
                 Quote(text),
                 actualPrefix,
-                expectedPrefix),
+                Quote(expectedPrefix)),
             text,
             InvalidIdReason.PrefixMismatch,
             expectedPrefix);

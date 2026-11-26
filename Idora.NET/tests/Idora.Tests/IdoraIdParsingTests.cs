@@ -580,4 +580,32 @@ public sealed class IdoraIdParsingTests
             e.Message.Length.ShouldBeLessThan(1000);
         }
     }
+
+    [Theory]
+    [InlineData("us_r")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void ParseTryParseAndIsValid_AnInvalidExpectedPrefix_ThrowWhateverTheText(string? badPrefix)
+    {
+        // Arrange: a mistake in the calling code, reported as such rather than as a mismatch, and for
+        // a malformed text as much as a valid one. A megabyte-long prefix stands in for the rest.
+        string expectedPrefix = badPrefix ?? new string('p', 1 << 20);
+
+        foreach (string text in new[] { "usr_01k226e0g0008j4ct4ank7f24s", "nonsense" })
+        {
+            // Act & Assert
+            InvalidEntityPrefixException[] thrown =
+            [
+                Should.Throw<InvalidEntityPrefixException>(() => IdoraId.Parse(text, expectedPrefix)),
+                Should.Throw<InvalidEntityPrefixException>(() => IdoraId.Parse(text.AsSpan(), expectedPrefix)),
+                Should.Throw<InvalidEntityPrefixException>(() => IdoraId.TryParse(text, expectedPrefix, out _)),
+                Should.Throw<InvalidEntityPrefixException>(() => IdoraId.IsValid(text, expectedPrefix)),
+            ];
+            foreach (InvalidEntityPrefixException exception in thrown)
+            {
+                exception.Prefix.ShouldBe(expectedPrefix);
+                exception.Message.Length.ShouldBeLessThan(1000);
+            }
+        }
+    }
 }

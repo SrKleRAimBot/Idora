@@ -265,9 +265,9 @@ func (e *InvalidIDError) Error() string {
 		return fmt.Sprintf("idora: %s is not a valid identifier: %s", text, detail)
 	case ReasonPrefixMismatch:
 		prefix, _, _ := strings.Cut(e.Text, string(Separator))
-		return fmt.Sprintf("idora: %s has the prefix %q, but the prefix %q was expected; prefixes "+
+		return fmt.Sprintf("idora: %s has the prefix %q, but the prefix %s was expected; prefixes "+
 			"are compared exactly, case included, so the identifier belongs to a different entity type",
-			text, prefix, e.ExpectedPrefix)
+			text, prefix, quoteText(e.ExpectedPrefix))
 	default:
 		_, value, _ := strings.Cut(e.Text, string(Separator))
 		return fmt.Sprintf("idora: %s is not a valid identifier: %s", text, valueProblem(value))
