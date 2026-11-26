@@ -196,6 +196,40 @@ func TestBatchCreate(t *testing.T) {
 	}
 }
 
+func TestCreateFromAMapAssignsTheKey(t *testing.T) {
+	db := open(t, newGen())
+	supplied := "usr_01k226e0g0008j4ct4ank7f24s"
+	rows := []map[string]any{
+		{"name": "Ada"},                     // no key at all
+		{"name": "Grace", "id": ""},         // an empty key under the column name
+		{"name": "Edsger", "ID": nil},       // a nil key under the field name
+		{"name": "Barbara", "id": supplied}, // a key of its own, kept
+	}
+	if err := db.Model(&User{}).Create(map[string]any{"name": "Alan"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&User{}).Create(rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	var users []User
+	if err := db.Order("name").Find(&users).Error; err != nil || len(users) != 5 {
+		t.Fatalf("read back %d users, %v", len(users), err)
+	}
+	for _, u := range users {
+		if _, err := idora.ParsePrefixed(u.ID, "usr"); err != nil {
+			t.Errorf("%s was stored with key %q: %v", u.Name, u.ID, err)
+		}
+		if u.Name == "Barbara" && u.ID != supplied {
+			t.Errorf("a supplied key was replaced with %q", u.ID)
+		}
+	}
+	for _, row := range rows[1:3] {
+		if len(row) != 2 {
+			t.Errorf("the key was added beside the empty one rather than in its place: %v", row)
+		}
+	}
+}
+
 func TestCreateAssignsAssociations(t *testing.T) {
 	db := open(t, newGen())
 	u := User{Name: "Ada", Orders: []Order{{Total: 1}, {Total: 2}}}

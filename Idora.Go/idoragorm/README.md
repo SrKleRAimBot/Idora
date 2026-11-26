@@ -27,11 +27,13 @@ It requires Go 1.23 and GORM v1.31 or later.
 ## Assigning primary keys
 
 `idoragorm.New(gen)` returns a `gorm.Plugin`. Once it's installed with `db.Use`, every create
-(`Create`, `CreateInBatches`, `Save` of a new row, and the rows GORM creates for associations)
+(`Create`, `CreateInBatches`, `Save` of a new row, the rows GORM creates for associations, and
+creates from a map or a slice of maps such as `db.Model(&User{}).Create(map[string]any{...})`)
 looks at the model's primary key, and fills it if all of these hold:
 
 - the key is a `string`, a type whose underlying type is `string`, or an `idora.ID`;
-- it's still empty, so a key you set yourself is never replaced;
+- it's still empty, so a key you set yourself is never replaced (in a map, a key under either the
+  field name or the column name counts, and an absent, nil or empty one is filled in place);
 - the model type has a prefix: it was registered with the generator (`WithEntity` or
   `WithEntities`), or it implements `idora.Entity` (see below).
 

@@ -121,33 +121,81 @@ func (p *Plugin) assign(db *gorm.DB) {
 		return
 	}
 
+	next := func() (any, error) {
+		id, err := p.gen.GenerateWithPrefix(prefix)
+		if err != nil || !asID {
+			return id, err
+		}
+		return idora.MustParse(id), nil
+	}
 	fill := func(row reflect.Value) {
 		if _, zero := field.ValueOf(stmt.Context, row); !zero {
 			return
 		}
-		id, err := p.gen.GenerateWithPrefix(prefix)
+		value, err := next()
 		if err == nil {
-			var value any = id
-			if asID {
-				value = idora.MustParse(id)
-			}
 			err = field.Set(stmt.Context, row, value)
 		}
 		if err != nil {
 			_ = db.AddError(err)
 		}
 	}
+	// db.Model(&User{}).Create(map[string]any{...}) creates from a map, keyed by field or column
+	// name as GORM accepts either. The key is filled under the name already present, else under the
+	// column name, unless it holds a value; an absent, nil or empty one counts as missing, as a
+	// zero struct field does.
+	fillMap := func(row reflect.Value) {
+		if row.Type().Key().Kind() != reflect.String {
+			return
+		}
+		name := field.DBName
+		for _, candidate := range []string{field.Name, field.DBName} {
+			key := reflect.ValueOf(candidate).Convert(row.Type().Key())
+			if existing := row.MapIndex(key); existing.IsValid() {
+				if !isEmpty(existing) {
+					return
+				}
+				name = candidate
+				break
+			}
+		}
+		value, err := next()
+		if err != nil {
+			_ = db.AddError(err)
+			return
+		}
+		if v := reflect.ValueOf(value); v.Type().AssignableTo(row.Type().Elem()) {
+			row.SetMapIndex(reflect.ValueOf(name).Convert(row.Type().Key()), v)
+		}
+	}
 
 	switch rv := stmt.ReflectValue; rv.Kind() {
 	case reflect.Slice, reflect.Array:
 		for i := range rv.Len() {
-			if row := reflect.Indirect(rv.Index(i)); row.Kind() == reflect.Struct {
+			switch row := reflect.Indirect(rv.Index(i)); row.Kind() {
+			case reflect.Struct:
 				fill(row)
+			case reflect.Map:
+				fillMap(row)
 			}
 		}
 	case reflect.Struct:
 		fill(rv)
+	case reflect.Map:
+		fillMap(rv)
 	}
+}
+
+// isEmpty reports whether a map value holds no key: nil, or the zero value of what it holds,
+// looking through interfaces and pointers, as a map[string]any value is an interface.
+func isEmpty(v reflect.Value) bool {
+	for v.IsValid() && (v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer) {
+		if v.IsNil() {
+			return true
+		}
+		v = v.Elem()
+	}
+	return !v.IsValid() || v.IsZero()
 }
 
 // prefixFor returns the prefix for a model type: the registered one, or a checked declaration.
