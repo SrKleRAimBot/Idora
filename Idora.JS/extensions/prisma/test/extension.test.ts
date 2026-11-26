@@ -104,6 +104,27 @@ describe('idoraExtension', () => {
     assert.ok(id.timestampMs >= startedAt);
   });
 
+  it('fills in an identifier left out with Prisma.skip, in every operation it covers', async () => {
+    // Arrange: the real marker, from Prisma's runtime; `strictUndefinedChecks` callers write
+    // `id: suppliedId ?? Prisma.skip`, which would otherwise send the create with no key at all.
+    const { skip } = (await import('@prisma/client/runtime/client')) as unknown as { skip: object };
+    const prisma = extend({ ids, models: { user: User } });
+
+    // Act
+    await prisma.user.create({ data: { id: skip, email: 'ada@example.com' } });
+    const created = lastSent(prisma).args as { data: { id: unknown } };
+    await prisma.user.createMany({ data: [{ id: skip, email: 'grace@example.com' }] });
+    const many = lastSent(prisma).args as { data: { id: unknown }[] };
+    await prisma.user.upsert({ where: { email: 'ada@example.com' }, create: { id: skip, email: 'ada@example.com' }, update: {} });
+    const upserted = lastSent(prisma).args as { create: { id: unknown } };
+
+    // Assert
+    for (const id of [created.data.id, many.data[0]!.id, upserted.create.id]) {
+      assert.equal(typeof id, 'string');
+      assert.ok(ids.isIdFor(User, id as string));
+    }
+  });
+
   it('keeps an identifier the query supplies', async () => {
     // Arrange
     const prisma = extend({ ids, models: { user: User } });

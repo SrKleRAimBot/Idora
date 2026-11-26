@@ -93,8 +93,9 @@ stops start-up rather than the first insert.
 | `createMany`, `createManyAndReturn` | every record in `data` |
 | `upsert` | `create` — `update` is left alone |
 
-Only a field that is missing — `undefined` — is filled. An identifier the query supplies is kept,
-and the arguments you pass are never modified: the query receives a copy.
+Only a field that is missing — `undefined`, or `Prisma.skip` with `strictUndefinedChecks`, as in
+`id: suppliedId ?? Prisma.skip` — is filled. An identifier the query supplies is kept, and the
+arguments you pass are never modified: the query receives a copy.
 
 Prisma does not run query extensions for records created by a **nested write**, such as
 `posts: { create: [...] }` inside a `user.create`. Give those an identifier yourself, with

@@ -179,7 +179,26 @@ function fillOne<T>(ids: ModelIds, data: T): T {
   }
 
   const record = data as Record<string, unknown>;
-  return record[ids.field] === undefined ? ({ ...record, [ids.field]: ids.generate() } as T) : data;
+  const supplied = record[ids.field];
+  return supplied === undefined || isPrismaSkip(supplied) ? ({ ...record, [ids.field]: ids.generate() } as T) : data;
+}
+
+/**
+ * Whether `value` is `Prisma.skip`, the marker `strictUndefinedChecks` uses to leave a field out,
+ * as in `id: suppliedId ?? Prisma.skip`. Passed through, it would send the create with no key at
+ * all, which the `@default(dbgenerated())` column cannot fill, so it counts as missing.
+ *
+ * Recognised by what it does rather than by identity: its class name is minified, and Prisma 6
+ * ships a separate instance in each runtime, so the one a generated client uses need not be the
+ * one this package could import. `skip.ifUndefined(undefined)` returns `skip` itself, and no
+ * identifier, a string, has that method.
+ */
+function isPrismaSkip(value: unknown): boolean {
+  if (value === null || typeof value !== 'object') {
+    return false;
+  }
+  const ifUndefined: unknown = (value as { readonly ifUndefined?: unknown }).ifUndefined;
+  return typeof ifUndefined === 'function' && ifUndefined.call(value, undefined) === value;
 }
 
 /** {@link fillOne} for `createMany`, whose `data` may be one record or a list of them. */
