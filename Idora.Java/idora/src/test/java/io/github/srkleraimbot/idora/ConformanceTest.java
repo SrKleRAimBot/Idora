@@ -17,9 +17,16 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Random;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -56,6 +63,10 @@ class ConformanceTest {
         Map<String, Object> prefixes = map(vectors.get("prefixes"));
         for (String key : List.of("valid", "invalid", "collidingPairs", "distinctPairs")) {
             assertFalse(list(prefixes.get(key)).isEmpty(), key);
+        }
+        Map<String, Object> ids = map(vectors.get("ids"));
+        for (String key : List.of("valid", "invalid", "ordered", "bounds")) {
+            assertFalse(list(ids.get(key)).isEmpty(), "ids." + key);
         }
     }
 
@@ -191,6 +202,140 @@ class ConformanceTest {
             return dynamicTest(first + " does not collide with " + second, () -> assertDoesNotThrow(() ->
                     IdoraGenerator.builder().registerEntity(User.class, first).registerEntity(Account.class, second)));
         });
+    }
+
+    @TestFactory
+    Stream<DynamicTest> idsValid() {
+        return list(map(vectors.get("ids")).get("valid")).stream().map(ConformanceTest::map).map(vector -> {
+            String text = (String) vector.get("id");
+            String prefix = (String) vector.get("prefix");
+            long timestamp = (Long) vector.get("timestampMs");
+            IdGenerationStrategy format = formatFor((String) vector.get("format"));
+            return dynamicTest("valid " + text, () -> {
+                // Act
+                IdoraId id = IdoraId.parse(text);
+
+                // Assert
+                assertEquals(prefix, id.prefix());
+                assertEquals(vector.get("value"), id.value());
+                assertEquals(format, id.format());
+                assertEquals(timestamp, id.timestampMillis());
+                assertEquals(Instant.ofEpochMilli(timestamp), id.timestamp());
+                assertEquals(text, id.toString());
+                assertTrue(IdoraId.isValid(text));
+                assertTrue(IdoraId.isValid(text, prefix));
+                assertEquals(Optional.of(id), IdoraId.tryParse(text));
+                assertEquals(id, IdoraId.parse(text, prefix));
+            });
+        });
+    }
+
+    @TestFactory
+    Stream<DynamicTest> idsInvalid() {
+        return list(map(vectors.get("ids")).get("invalid")).stream().map(ConformanceTest::map).map(vector -> {
+            String text = (String) vector.get("id");
+            InvalidIdException.Reason reason = idReasonFor((String) vector.get("reason"));
+            String expectedPrefix = (String) vector.get("expectedPrefix");
+            return dynamicTest("invalid '" + text + "' (" + vector.get("reason") + ")", () -> {
+                // Act
+                InvalidIdException exception = assertThrows(InvalidIdException.class, () -> {
+                    if (expectedPrefix == null) {
+                        IdoraId.parse(text);
+                    } else {
+                        IdoraId.parse(text, expectedPrefix);
+                    }
+                });
+
+                // Assert
+                assertEquals(reason, exception.getReason());
+                assertEquals(text, exception.getText());
+                assertEquals(Optional.ofNullable(expectedPrefix), exception.getExpectedPrefix());
+                assertEquals(reason == InvalidIdException.Reason.PREFIX,
+                        exception.getCause() instanceof InvalidEntityPrefixException);
+                if (expectedPrefix == null) {
+                    assertFalse(IdoraId.isValid(text));
+                    assertEquals(Optional.empty(), IdoraId.tryParse(text));
+                } else {
+                    assertFalse(IdoraId.isValid(text, expectedPrefix));
+                    assertEquals(Optional.empty(), IdoraId.tryParse(text, expectedPrefix));
+                }
+            });
+        });
+    }
+
+    @TestFactory
+    Stream<DynamicTest> idsOrdered() {
+        List<IdoraId> ordered = list(map(vectors.get("ids")).get("ordered")).stream()
+                .map(String.class::cast)
+                .map(IdoraId::parse)
+                .collect(Collectors.toList());
+        Random random = new Random(20261126);
+        return IntStream.range(0, 50).mapToObj(round -> {
+            List<IdoraId> shuffled = new ArrayList<>(ordered);
+            if (round == 1) {
+                Collections.reverse(shuffled);
+            } else if (round > 1) {
+                Collections.shuffle(shuffled, random);
+            }
+            return dynamicTest("permutation " + round, () -> {
+                // Act
+                List<IdoraId> sorted = new ArrayList<>(shuffled);
+                Collections.sort(sorted);
+
+                // Assert
+                assertEquals(ordered, sorted);
+            });
+        });
+    }
+
+    @TestFactory
+    Stream<DynamicTest> idsBounds() {
+        return list(map(vectors.get("ids")).get("bounds")).stream().map(ConformanceTest::map).map(vector -> {
+            long timestamp = (Long) vector.get("timestampMs");
+            IdGenerationStrategy format = formatFor((String) vector.get("format"));
+            String lower = (String) vector.get("lower");
+            String upper = (String) vector.get("upper");
+            return dynamicTest(vector.get("format") + " bounds at " + timestamp, () -> {
+                // Act & Assert: the values, the identifiers built from them, and that both parse.
+                assertEquals(lower, IdoraId.lowerBoundValue(timestamp, format));
+                assertEquals(upper, IdoraId.upperBoundValue(timestamp, format));
+                assertEquals(lower, IdoraId.lowerBoundValue(Instant.ofEpochMilli(timestamp), format));
+                assertEquals(upper, IdoraId.upperBoundValue(Instant.ofEpochMilli(timestamp), format));
+                assertEquals("usr_" + lower, IdoraId.lowerBound("usr", timestamp, format).toString());
+                assertEquals("usr_" + upper, IdoraId.upperBound("usr", Instant.ofEpochMilli(timestamp), format).toString());
+                for (String value : List.of(lower, upper)) {
+                    IdoraId parsed = IdoraId.parse("usr_" + value);
+                    assertEquals(format, parsed.format());
+                    assertEquals(timestamp, parsed.timestampMillis());
+                }
+            });
+        });
+    }
+
+    private static IdGenerationStrategy formatFor(String format) {
+        switch (format) {
+            case "ulid":
+                return IdGenerationStrategy.ULID;
+            case "uuidv7":
+                return IdGenerationStrategy.UUID_V7;
+            default:
+                throw new IllegalArgumentException("unknown format in test vectors: " + format);
+        }
+    }
+
+    private static InvalidIdException.Reason idReasonFor(String reason) {
+        switch (reason) {
+            case "noSeparator":
+                return InvalidIdException.Reason.NO_SEPARATOR;
+            case "prefix":
+                return InvalidIdException.Reason.PREFIX;
+            case "value":
+                return InvalidIdException.Reason.VALUE;
+            case "prefixMismatch":
+                return InvalidIdException.Reason.PREFIX_MISMATCH;
+            default:
+                throw new IllegalArgumentException("unknown reason in test vectors: " + reason);
+        }
     }
 
     private static Reason reasonFor(String reason) {

@@ -51,20 +51,20 @@ Maven:
 <dependency>
   <groupId>io.github.srkleraimbot</groupId>
   <artifactId>idora</artifactId>
-  <version>1.0.0</version>
+  <version>1.1.0</version>
 </dependency>
 ```
 
 Gradle (Kotlin DSL):
 
 ```kotlin
-implementation("io.github.srkleraimbot:idora:1.0.0")
+implementation("io.github.srkleraimbot:idora:1.1.0")
 ```
 
 Gradle (Groovy DSL):
 
 ```groovy
-implementation 'io.github.srkleraimbot:idora:1.0.0'
+implementation 'io.github.srkleraimbot:idora:1.1.0'
 ```
 
 Requires Java 17 or later. The jar has no dependencies beyond `java.base`. It is a named JPMS
@@ -73,6 +73,15 @@ module; on the module path, add:
 ```java
 requires io.github.srkleraimbot.idora;
 ```
+
+Optional integrations, each a separate artifact with the same group and version (see
+[Integrations](#integrations)):
+
+| Artifact | For |
+| --- | --- |
+| [`idora-jackson`](idora-jackson) | `IdoraId` as a JSON string, with per-property prefix checks |
+| [`idora-hibernate`](idora-hibernate) | `@IdoraGeneratedId` primary keys and `IdoraId` columns in Hibernate ORM 6 |
+| [`idora-spring-boot`](idora-spring-boot) | Spring Boot 3 auto-configuration: the generator bean, web binding, and the two above wired in |
 
 ---
 
@@ -118,6 +127,16 @@ container you use.
 IdoraGenerator idoraGenerator() {
     return IdoraGenerator.builder().registerEntitiesFromPackageOf(User.class).build();
 }
+```
+
+(With [`idora-spring-boot`](idora-spring-boot) on the class path you do not need even that: the bean
+is auto-configured from your `@EntityPrefix` types and `idora.*` properties.)
+
+When an identifier comes back, in a route, a message or a foreign key, parse it:
+
+```java
+IdoraId id = ids.parseId(Order.class, pathVariable);   // throws unless it is a well-formed "ord_" identifier
+id.timestamp();                                        // 2025-08-12T14:09:47.850Z
 ```
 
 ---
@@ -306,13 +325,135 @@ for instance:
 ```java
 EntityPrefixRegistry prefixes = ids.registry();
 
-boolean isOrderId = id.startsWith(prefixes.getPrefix(Order.class) + "_");
+String prefix = prefixes.getPrefix(Order.class);                  // "ord"
 Optional<String> maybe = prefixes.findPrefix(Comment.class);      // Optional.empty()
 Map<Class<?>, String> all = prefixes.registrations();             // unmodifiable, in registration order
 ```
 
 `getPrefix` throws `EntityPrefixNotRegisteredException` for an unregistered type; `findPrefix`
-returns an empty `Optional`. Prefixes come back exactly as registered, without the separator.
+returns an empty `Optional`. Prefixes come back exactly as registered, without the separator. To
+check that a string is an identifier for a given type, do not compare prefixes by hand: use
+`ids.isIdFor(Order.class, text)`, which also checks the value (see
+[Reading identifiers back](#reading-identifiers-back)).
+
+---
+
+## Reading identifiers back
+
+Generation is half of the job. Identifiers come back, in a route, a message, a foreign key, and code
+needs to check them, read them and put them in order without re-implementing the format. `IdoraId`
+is that: an immutable, parsed identifier.
+
+```java
+IdoraId id = IdoraId.parse("usr_01k2f9v8ta7m3x0qbrn4dzeh5c");
+
+id.prefix();            // "usr"
+id.value();             // "01k2f9v8ta7m3x0qbrn4dzeh5c"
+id.format();            // IdGenerationStrategy.ULID
+id.timestamp();         // 2025-08-12T14:09:47.850Z, an Instant in UTC
+id.timestampMillis();   // 1755007787850
+id.toString();          // "usr_01k2f9v8ta7m3x0qbrn4dzeh5c", exactly the parsed text
+```
+
+Any conforming identifier parses, in either format, whichever strategy your generator uses and
+whichever Idora package (Java, .NET, JS, Go, Rust) minted it. The timestamp is read from the value
+itself, so it does not depend on the reader's clock or time zone.
+
+### Parsing
+
+| Call | Returns | On a malformed identifier |
+| --- | --- | --- |
+| `IdoraId.parse(text)` | `IdoraId` | throws `InvalidIdException` |
+| `IdoraId.parse(text, "usr")` | `IdoraId` with exactly that prefix | throws `InvalidIdException` |
+| `IdoraId.tryParse(text)`, `tryParse(text, "usr")` | `Optional<IdoraId>` | empty; no exception is created |
+| `IdoraId.isValid(text)`, `isValid(text, "usr")` | `boolean` | `false` |
+| `ids.parseId(User.class, text)` | `IdoraId` with `User`'s registered prefix | throws `InvalidIdException` |
+| `ids.tryParseId(User.class, text)` | `Optional<IdoraId>` | empty |
+| `ids.isIdFor(User.class, text)` | `boolean` | `false` |
+
+Parsing is **strict**: it accepts exactly what a generator emits and nothing else. No trimming, no
+case folding, no hyphens. ` usr_01k2...`, `usr_01K2...` and `inv_01988467-0200-7011-...` are all
+rejected, because a lenient parser lets two different strings name the same row. The checks run in
+this order, and the first failure is reported as the exception's `Reason`:
+
+1. `NO_SEPARATOR`: there is no `_`.
+2. `PREFIX`: the text before the first `_` is not a valid prefix. The `InvalidEntityPrefixException`
+   saying exactly why is attached as the cause.
+3. `VALUE`: the text after it is neither a 26-character lowercase ULID (first character at most
+   `7`) nor a 32-character lowercase UUIDv7 (version `7` at index 12, variant `8`, `9`, `a` or `b`
+   at index 16). The message says which character, at which index, is wrong.
+4. `PREFIX_MISMATCH`: only when you asked for a prefix, and the identifier carries a different one.
+   The comparison is exact, case included: `USR_...` is not a `usr` identifier.
+
+The registry-aware forms (`parseId`, `tryParseId`, `isIdFor`) look the prefix up for you. For a type
+that was never registered they throw `EntityPrefixNotRegisteredException`, not
+`InvalidIdException`, even from `isIdFor`: the identifier is not at fault, your configuration is.
+
+A `null` text throws `NullPointerException` from every form, including `tryParse` and `isValid`.
+So does an expected prefix that is itself invalid (`InvalidEntityPrefixException`), since no
+identifier could ever carry it.
+
+### Equality and order
+
+Two `IdoraId`s are equal when their texts are equal, character for character; `hashCode` follows.
+`IdoraId` is `Comparable`, and its natural order is **chronological**: by timestamp, then by value,
+then by prefix. That is not the same as sorting the strings:
+
+```java
+IdoraId user  = IdoraId.parse("usr_01k226e0g0008j4ct4ank7f24s");        // 12:00:00.000
+IdoraId order = IdoraId.parse("ord_0198846702017fee9dccbbaa99887766");  // 12:00:00.001, a UUIDv7
+
+user.compareTo(order) < 0;   // true: the user came first, though "ord" < "usr"
+user.isBefore(order);        // true
+```
+
+Ordering by time first is what makes identifiers of different entity types, and of both formats,
+interleave in the order they were made. For ULIDs generated on one thread the natural order is
+exactly generation order. It is consistent with `equals`, so `TreeSet<IdoraId>` and
+`TreeMap<IdoraId, ...>` behave.
+
+| Method | Compares |
+| --- | --- |
+| `compareTo`, `isBefore`, `isAfter` | the natural order; strict |
+| `compareTimestamp`, `isSameMillisecond`, `IdoraId.TIMESTAMP_ORDER` | the millisecond only; identifiers from the same millisecond tie |
+| `isCreatedBefore(instant)`, `isCreatedAfter(instant)` | the millisecond against an `Instant`, strict, with the instant's sub-millisecond part truncated |
+| `hasPrefix("usr")` | the prefix, exactly, case included |
+
+`TIMESTAMP_ORDER` is not consistent with `equals` (a `TreeSet` built with it keeps one identifier
+per millisecond); use it to sort or group by time.
+
+### Range bounds: querying by creation time
+
+Because a value starts with its timestamp, every `usr` identifier minted during one span of time is
+one contiguous range of strings. The bounds give you its ends, so a column of identifiers can be
+filtered by creation time with no timestamp column and no parsing:
+
+```java
+Instant from = Instant.parse("2025-08-01T00:00:00Z");
+Instant to   = Instant.parse("2025-08-31T23:59:59.999Z");
+
+// SELECT * FROM orders WHERE id >= ? AND id <= ?
+statement.setString(1, ids.lowerBound(Order.class, from).toString());   // ord_01k1hevb000000000000000000
+statement.setString(2, ids.upperBound(Order.class, to).toString());     // ord_01k4195kzzzzzzzzzzzzzzzzzz
+```
+
+| Call | Gives |
+| --- | --- |
+| `ids.lowerBound(Order.class, instant)`, `ids.upperBound(...)` | the registered prefix, in the generator's format |
+| `IdoraId.lowerBound("ord", instant, format)`, `upperBound(...)` | any prefix and format; also with a `long` millisecond count |
+| `IdoraId.lowerBoundValue(instant, format)`, `upperBoundValue(...)` | the value alone, without a prefix |
+
+The lower bound is the timestamp characters followed by the smallest random field (`0000000000000000`
+for ULID, `7000` `8000` `000000000000` for UUIDv7), the upper bound by the largest (`zzzzzzzzzzzzzzzz`,
+`7fff` `bfff` `ffffffffffff`). Both are themselves valid identifiers. They compare correctly against
+identifiers of the **same prefix and format** as plain strings, which is the shape of a database
+column holding one entity type; use a binary or `C` collation, as for any identifier column. An
+instant before 1970 or after the year 10889 (the 48-bit limit) throws `IllegalArgumentException`.
+
+### Serialization
+
+`IdoraId` is `Serializable`. Its serialized form is its text alone, and reading it back parses that
+text again, strictly, so a tampered stream cannot produce an identifier that would not parse.
 
 ---
 
@@ -356,17 +497,19 @@ you already know it from the column you are reading.
 ## Error handling
 
 Every Idora exception extends `IdoraException`, an unchecked, **sealed** base class, so you can
-catch that one type, or `switch` exhaustively over the three subclasses.
+catch that one type, or `switch` exhaustively over the four subclasses.
 
 | Exception | Thrown when | Thrown at | Fix |
 | --- | --- | --- | --- |
 | `InvalidEntityPrefixException` | A prefix is empty, longer than 16 characters, or contains something other than an ASCII letter or digit | Start-up (registration), or on the `generate(String)` call | Use 1-16 letters and digits, no underscore |
 | `DuplicateEntityPrefixException` | One prefix is registered for two types (ignoring ASCII case), or one type is registered twice, by any combination of `registerEntity`, annotations and scans | Start-up | Give each type its own prefix, and register it exactly once |
-| `EntityPrefixNotRegisteredException` | `generate(Class)` or `registry().getPrefix(Class)` for a type with no prefix | On the call | Register the type, or use `generate(String)` |
+| `EntityPrefixNotRegisteredException` | `generate(Class)`, `registry().getPrefix(Class)`, or a registry-aware read (`parseId`, `isIdFor`, `lowerBound`, ...) for a type with no prefix | On the call | Register the type, or use `generate(String)` |
+| `InvalidIdException` | A text given to `IdoraId.parse` or `parseId` is not a conforming identifier, or has a different prefix from the one expected | On the call, usually with input from outside | Treat it as bad input: a `400` or `404`, not a `500` |
 
 Outside that hierarchy, as Java convention expects:
 
 - a `null` argument throws `NullPointerException` whose message is the parameter name;
+- a range bound for an instant outside 1970 to the 48-bit limit throws `IllegalArgumentException`;
 - `registerEntities` given a type without `@EntityPrefix`, or `registerEntitiesFromPackageOf` given a
   primitive, an array, a class in the unnamed package, or a class loaded from somewhere that cannot
   be listed, throws `IllegalArgumentException` saying what to do instead.
@@ -405,7 +548,20 @@ try {
     e.getIndex();                   // OptionalInt[4]
     e.getEntityType();              // Optional.empty(), or the annotated type
 }
+
+try {
+    ids.parseId(User.class, "ord_01k2f9v8ta7m3x0qbrn4dzeh5c");
+} catch (InvalidIdException e) {
+    e.getReason();                  // Reason.PREFIX_MISMATCH  (NO_SEPARATOR, PREFIX, VALUE or PREFIX_MISMATCH)
+    e.getText();                    // "ord_01k2f9v8ta7m3x0qbrn4dzeh5c"
+    e.getExpectedPrefix();          // Optional[usr]
+    e.getCause();                   // for Reason.PREFIX, the InvalidEntityPrefixException saying why
+}
 ```
+
+An `InvalidIdException` message quotes the rejected text with control characters escaped and
+anything past 64 characters cut off, so a hostile identifier cannot forge a log line or flood one;
+`getText()` always has the whole thing.
 
 ---
 
@@ -559,7 +715,9 @@ tickets. **Treat them as public.** Authorise every request properly; never use a
 bearer token or a password-reset secret.
 
 **How do I split an identifier back apart?**
-Split on the first underscore. The prefix cannot contain one, so this is unambiguous:
+Parse it: `IdoraId.parse(id).prefix()` and `.value()`. That also checks it. If you only need the
+pieces of an identifier you already trust, split on the first underscore; the prefix cannot contain
+one, so this is unambiguous:
 
 ```java
 int separator = id.indexOf('_');
@@ -567,9 +725,17 @@ String prefix = id.substring(0, separator);    // "usr"
 String value  = id.substring(separator + 1);   // "01k2f9v8ta7m3x0qbrn4dzeh5c"
 ```
 
+**Should I store `String` or `IdoraId` in my entities?**
+Either. `String` costs nothing and is what every framework already understands. `IdoraId` makes the
+type say what it holds, rejects malformed values at the boundary and sorts chronologically; parsing
+costs a few tens of nanoseconds. The [integrations](#integrations) map `IdoraId` to a string column
+and a JSON string for you.
+
 **Can I use these as JPA / Hibernate primary keys?**
-Yes; they are ordinary strings. Assign one in the constructor or a `@PrePersist` callback rather
-than asking the database to generate the key, and map the column as a fixed-length string. Because
+Yes. With [`idora-hibernate`](idora-hibernate), annotate the key with `@IdoraGeneratedId` and
+Hibernate assigns `usr_...` on `persist`, for a `String` or an `IdoraId` attribute. Without it they
+are ordinary strings: assign one in the constructor or a `@PrePersist` callback rather than asking
+the database to generate the key, and map the column as a fixed-length string. Either way, because
 the values are time-ordered, B-tree inserts stay at the right-hand edge of the index, which is the
 reason to prefer them over `UUID.randomUUID()`.
 
@@ -606,6 +772,27 @@ stay strictly increasing even when they alternate between generators.
 
 ---
 
+## Integrations
+
+Each is a separate, optional artifact under the same `io.github.srkleraimbot` group, released at
+the same version as `idora` from the same tag. The core never depends on any of them.
+
+| Artifact | What it does | Built and tested against |
+| --- | --- | --- |
+| [`idora-jackson`](idora-jackson) | A Jackson `Module` writing `IdoraId` as a string and reading it back strictly, map keys included; `@IdoraIdPrefix("usr")` requires a prefix per property | Jackson 2.21 |
+| [`idora-hibernate`](idora-hibernate) | `@IdoraGeneratedId` on an `@Id` generates `usr_...` before the insert; every `IdoraId` attribute and query parameter is a `VARCHAR` with no annotation; a JPA `AttributeConverter` | Hibernate ORM 6.6, H2 |
+| [`idora-spring-boot`](idora-spring-boot) | Auto-configures the `IdoraGenerator` bean from `idora.*` properties and the application's `@EntityPrefix` types, binds `@PathVariable IdoraId`, and wires in the two above when present | Spring Boot 3.5 |
+
+```xml
+<dependency>
+  <groupId>io.github.srkleraimbot</groupId>
+  <artifactId>idora-spring-boot</artifactId>
+  <version>1.1.0</version>
+</dependency>
+```
+
+---
+
 ## Contributing
 
 From `Idora.Java/`, with JDK 17 or later:
@@ -623,11 +810,23 @@ Arrange-Act-Assert, and run on the module path patched into the library's module
 default time zone. They cover every public member's success, failure and edge cases; the encoders,
 the monotonic counter, the striped entropy pool and the package scanner directly (named module,
 exploded directory and jar, the last two through a fresh class loader); uniqueness and ordering
-across platform and virtual threads; the allocation claim; and every vector in
-[`spec/test-vectors.json`](../spec/test-vectors.json).
+across platform and virtual threads; the allocation claim; parsing, ordering, bounds and
+serialization of `IdoraId`; and every vector in [`spec/test-vectors.json`](../spec/test-vectors.json),
+including sorting fifty permutations of `ids.ordered`. The integrations are tested against the real
+frameworks: Jackson databind, Hibernate over an in-memory H2 database, and Spring Boot through
+`ApplicationContextRunner`, a JPA context and MockMvc.
 
-Releases are built with the `release` profile, which signs the artifacts and publishes `idora` (and
-only `idora`, with a flattened, parent-free POM) to Maven Central through the Central Portal:
+| Module | Published | Depends on |
+| --- | --- | --- |
+| `idora` | yes | nothing |
+| `idora-jackson` | yes | `idora`, `jackson-databind` |
+| `idora-hibernate` | yes | `idora`; `hibernate-core` provided |
+| `idora-spring-boot` | yes | `idora`, `spring-boot-autoconfigure`; the other two and Jackson optional |
+| `benchmarks` | no | |
+
+Releases are built with the `release` profile, which signs the artifacts and publishes the four
+published modules (never the parent or the benchmarks, and each with a flattened, parent-free POM)
+to Maven Central through the Central Portal, as one deployment:
 
 ```bash
 mvn -B -P release deploy

@@ -39,12 +39,27 @@ jobs:
         run: mvn -B verify
 
       - name: Check the library has no runtime dependencies
-        # The zero-dependency promise is part of the artifact's contract, so it is enforced.
+        # The zero-dependency promise is part of the core artifact's contract, so it is enforced. The
+        # integrations (idora-jackson, idora-hibernate, idora-spring-boot) depend on their framework
+        # by design and are not checked here.
         run: |
           DEPS=$(mvn -B -q -pl idora dependency:list -DincludeScope=runtime -DoutputFile=/dev/stdout -DexcludeTransitive=false | grep -E '^\s+[a-z]' | grep -vx '\s*none' || true)
           if [ -n "$DEPS" ]; then
             echo "::error::the idora artifact has runtime dependencies:"; echo "$DEPS"; exit 1
           fi
+
+      - name: Check the release build
+        # Runs the release profile up to `package` (flattened, parent-free POMs for every published
+        # module) without signing or uploading anything, so a release-only breakage surfaces here
+        # rather than on a tag.
+        if: matrix.java == 21
+        run: |
+          mvn -B -P release -DskipTests package
+          for module in idora idora-jackson idora-hibernate idora-spring-boot; do
+            if grep -q '<parent>' "$module/target/.flattened-pom.xml"; then
+              echo "::error::the published $module POM still references the build parent"; exit 1
+            fi
+          done
 
       - name: Benchmark (smoke)
         # One very short pass so the JMH harness keeps building and running; numbers from shared
@@ -59,4 +74,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: idora-java
-          path: Idora.Java/idora/target/*.jar
+          # Every published module (idora, idora-jackson, idora-hibernate, idora-spring-boot); the
+          # benchmarks jar is not one of them.
+          path: Idora.Java/idora*/target/*.jar
