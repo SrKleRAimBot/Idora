@@ -34,7 +34,10 @@ jobs:
         run: |
           DIR="${GITHUB_REF_NAME%/*}"         # Idora.Go or Idora.Go/idoragorm
           VERSION="${GITHUB_REF_NAME##*/}"    # v1.2.3
-          if ! echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+          # Matched against the whole value, not line by line as grep would: a value with a newline in it
+          # must not pass on the strength of its first line.
+          SEMVER='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+          if ! [[ "$VERSION" =~ $SEMVER ]]; then
             echo "::error::'$VERSION' is not a valid Go module version (expected e.g. v1.0.0)"
             exit 1
           fi

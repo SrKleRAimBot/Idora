@@ -72,7 +72,10 @@ jobs:
 
           # Guard against a mistyped tag producing a nonsense package version. NuGet versions
           # are irreversible once published, so this is worth being strict about.
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+          # Matched against the whole value, not line by line as grep would: a value with a newline in it
+          # must not pass on the strength of its first line.
+          SEMVER='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+          if ! [[ "$VERSION" =~ $SEMVER ]]; then
             echo "::error::'$VERSION' is not a valid semantic version (expected e.g. 1.0.0 or 1.0.0-rc.1)"
             exit 1
           fi

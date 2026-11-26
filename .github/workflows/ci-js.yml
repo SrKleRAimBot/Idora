@@ -59,6 +59,12 @@ jobs:
       - name: Build the extensions
         run: npm run build --workspaces
 
+      - name: Compile the extensions against their oldest supported peers
+        # The workspace tests run against one version of each peer. This installs the lowest
+        # version each peer range admits and compiles a strict consumer of every built extension,
+        # so a declaration that only a newer peer can satisfy fails here rather than for a user.
+        run: node scripts/check-peer-floors.mjs
+
       - name: Test the extensions
         run: npm test --workspaces
 

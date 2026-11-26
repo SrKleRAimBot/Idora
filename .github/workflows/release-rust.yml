@@ -19,8 +19,12 @@ env:
 
 # One release at a time: what a publish skips depends on what is already on crates.io.
 concurrency:
-  group: release-rust
+  # Dry runs get a group of their own, so they never hold up or displace a release; and every
+  # tagged release waits its turn (queue: max) rather than replacing one already pending, which
+  # is what a concurrency group does by default.
+  group: release-rust-${{ github.event_name }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   publish:

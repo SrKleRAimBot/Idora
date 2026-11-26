@@ -753,7 +753,10 @@ never been released:
    versions are not already the tag's, stamp them as the workflow's "Stamp the version from the
    tag" step does, which also sets each extension's `idora.js` peer range. Then build with
    `npm run build && npm run build --workspaces`, and publish each new package with
-   `npm publish -w extensions/<name> --access public`. That first version has no provenance.
+   `npm publish -w extensions/<name> --access public --tag <tag>`, where `<tag>` is `next` for a
+   prerelease and `latest` otherwise. Give the tag explicitly: `npm publish` alone tags whatever it
+   publishes `latest`, prereleases included, and the workflow skips that version when re-run, so it
+   would not correct it. That first version has no provenance.
 3. On npmjs.com, open each new package's settings and add a trusted publisher: GitHub Actions,
    repository `SrKleRAimBot/Idora`, workflow `release-js.yml`.
 4. Re-run the workflow. It skips what is already published, publishes the rest, and every later
