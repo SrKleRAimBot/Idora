@@ -84,7 +84,10 @@ schema module loads — so a forgotten registration stops start-up rather than t
 With `mode: 'parsed'`, rows are read as `IdoraId` objects — with `createdAt`, `prefix` and the
 natural order to hand — and `IdoraId` objects are written as their text. The database column is
 the same either way. A parsed column checks the entity's prefix in both directions: a row holding
-another entity's identifier throws `InvalidIdError` when read, and so does writing one.
+another entity's identifier throws `InvalidIdError` when read, and so does writing one. It checks
+the format too, since the time filters compute their bounds in the generator's format and would
+silently miss a row in the other one: a UUIDv7 in a ULID column, or the reverse, throws a
+`TypeError` either way. To change strategy, migrate the existing rows along with the column.
 
 ```ts
 export const events = pgTable('events', {

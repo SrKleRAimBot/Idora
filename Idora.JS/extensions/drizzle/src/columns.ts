@@ -86,20 +86,33 @@ export function recall(column: unknown): IdoraColumnInfo | undefined {
 
 /**
  * @internal The conversions for a `'parsed'` column. Values are checked against the entity's
- * prefix in both directions: a row holding another entity's identifier fails to read, and an
- * `IdoraId` for another entity fails to write, rather than either slipping through.
+ * prefix and the column's format in both directions: a row holding another entity's identifier, or
+ * one in the other format, fails to read, and writing one fails too, rather than either slipping
+ * through. The format matters as much as the prefix: the time filters compute their bounds in the
+ * column's format, so a row in the other format would silently fall outside them.
  */
 export function parsedConversions(info: IdoraColumnInfo): {
   readonly toDriver: (value: IdoraId) => string;
   readonly fromDriver: (value: string) => IdoraId;
 } {
-  const { ids, entityType, prefix } = info;
+  const { ids, entityType, prefix, format } = info;
+  const inFormat = (id: IdoraId): IdoraId => {
+    if (id.format !== format) {
+      throw new TypeError(
+        `'${id.text}' is a ${id.format} identifier, but this column holds ${format} identifiers, the generator's strategy. ` +
+          'A column holds one format, so that its time filters find every row; migrate existing rows when changing strategy.',
+      );
+    }
+    return id;
+  };
   return {
     toDriver: (value) =>
-      value instanceof IdoraId && value.prefix === prefix
-        ? value.text
-        : ids.parse(entityType, value instanceof IdoraId ? value.text : (value as unknown as string)).text,
-    fromDriver: (value) => ids.parse(entityType, value),
+      inFormat(
+        value instanceof IdoraId && value.prefix === prefix
+          ? value
+          : ids.parse(entityType, value instanceof IdoraId ? value.text : (value as unknown as string)),
+      ).text,
+    fromDriver: (value) => inFormat(ids.parse(entityType, value)),
   };
 }
 

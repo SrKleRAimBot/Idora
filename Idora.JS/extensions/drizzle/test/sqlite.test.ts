@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { asc } from 'drizzle-orm';
+import { asc, sql } from 'drizzle-orm';
 import { getTableConfig, QueryBuilder, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import { drizzle } from 'drizzle-orm/sqlite-proxy';
 import { Idora, IdoraId } from 'idora.js';
@@ -110,5 +110,31 @@ describe('SQLite inserts, reads and filters', { skip: sqlite === undefined && 'n
     assert.ok(rows[0]!.id instanceof IdoraId);
     assert.equal(rows[0]!.id.timestampMs, T);
     assert.equal(rows[0]!.userId, userId);
+  });
+
+  it('refuses to write an identifier in the other format into a parsed column', async () => {
+    // Arrange: SQLite's text column has no length to catch it, and the ULID time filters would
+    // never find a UUIDv7 row.
+    const db = connect();
+    const uuidV7 = IdoraId.parse(new Idora({ strategy: 'uuidv7', entities: [[Session, 'ses']] }).generate(Session));
+
+    // Act & Assert
+    await assert.rejects(
+      db.insert(sessions).values({ id: uuidV7, userId: ids.generate(User) }),
+      (error: unknown) => error instanceof TypeError && /uuidv7 identifier, but this column holds ulid/.test(error.message),
+    );
+  });
+
+  it('refuses to read a row whose identifier is in the other format into a parsed column', async () => {
+    // Arrange
+    const db = connect();
+    const uuidV7 = new Idora({ strategy: 'uuidv7', entities: [[Session, 'ses']] }).generate(Session);
+    await db.run(sql`INSERT INTO sessions (session_id, "userId") VALUES (${uuidV7}, ${ids.generate(User)})`);
+
+    // Act & Assert
+    await assert.rejects(
+      db.select().from(sessions),
+      (error: unknown) => error instanceof TypeError && /uuidv7 identifier, but this column holds ulid/.test(error.message),
+    );
   });
 });
