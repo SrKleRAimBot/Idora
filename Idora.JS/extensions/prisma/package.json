@@ -49,7 +49,7 @@
     "prepack": "npm run build"
   },
   "peerDependencies": {
-    "@prisma/client": "^6.0.0 || ^7.0.0",
+    "@prisma/client": "^6.4.0 || ^7.0.0",
     "idora.js": "^1.1.0"
   },
   "devDependencies": {

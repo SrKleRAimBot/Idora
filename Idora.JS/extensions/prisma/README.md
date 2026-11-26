@@ -33,7 +33,7 @@ remembering `id: ids.generate(User)` at every create. This puts it in one place.
 npm install idora.js-prisma idora.js @prisma/client
 ```
 
-`idora.js` and `@prisma/client` (6 or 7) are peer dependencies, and this package adds no others. It
+`idora.js` and `@prisma/client` (6.4 or later, or 7) are peer dependencies, and this package adds no others. It
 is an ES module with TypeScript declarations included.
 
 ---
