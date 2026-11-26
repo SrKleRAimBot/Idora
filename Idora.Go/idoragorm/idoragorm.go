@@ -144,7 +144,7 @@ func (p *Plugin) assign(db *gorm.DB) {
 	// name: GORM accepts either, and sends both to the same column, so both are looked at. An
 	// absent, nil or empty entry counts as missing, as a zero struct field does, and is removed, so
 	// that the key GORM sends cannot depend on which of two entries it meets first. A supplied key
-	// is kept; two different ones are an error.
+	// is kept, once; two different ones are an error.
 	aliases := []string{field.DBName}
 	if field.Name != field.DBName {
 		aliases = append(aliases, field.Name)
@@ -184,6 +184,11 @@ func (p *Plugin) assign(db *gorm.DB) {
 		}
 		for _, name := range emptyNames {
 			row.SetMapIndex(reflect.ValueOf(name).Convert(keyType), reflect.Value{})
+		}
+		if len(supplied) == 2 {
+			// The same key under both names: keep the column name's entry only, or GORM lists the
+			// column twice in the INSERT, which PostgreSQL rejects.
+			row.SetMapIndex(reflect.ValueOf(aliases[1]).Convert(keyType), reflect.Value{})
 		}
 		if len(supplied) > 0 {
 			return

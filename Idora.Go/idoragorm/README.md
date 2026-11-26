@@ -34,7 +34,8 @@ looks at the model's primary key, and fills it if all of these hold:
 - the key is a `string`, a type whose underlying type is `string`, or an `idora.ID`;
 - it's still empty, so a key you set yourself is never replaced. In a map, a key under either the
   field name or the column name counts; an absent, nil or empty one is filled, an empty entry under
-  the other name is dropped so it cannot win, two different keys are an error, and a nil map in a
+  the other name is dropped so it cannot win, the same key under both names is sent once, two
+  different keys are an error, and a nil map in a
   batch is treated as an empty row;
 - the model type has a prefix: it was registered with the generator (`WithEntity` or
   `WithEntities`), or it implements `idora.Entity` (see below).

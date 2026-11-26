@@ -262,6 +262,17 @@ func TestCreateFromMapsWithANilRowOrTwoNamesForTheKey(t *testing.T) {
 		}
 	}
 
+	// The same key under both names is sent once: GORM would otherwise list the column twice,
+	// which PostgreSQL rejects.
+	both := map[string]any{"name": "Barbara", "ID": supplied, "id": supplied}
+	stmt := db.Session(&gorm.Session{DryRun: true}).Model(&User{}).Create(both).Statement
+	if sql := stmt.SQL.String(); strings.Count(sql, "`id`")+strings.Count(sql, `"id"`) != 1 {
+		t.Errorf("the key column is not listed exactly once: %s", sql)
+	}
+	if _, alias := both["ID"]; alias || both["id"] != supplied {
+		t.Errorf("want only the column name's entry kept: %v", both)
+	}
+
 	// Two different keys under the two names are a mistake, reported rather than guessed at.
 	err := db.Model(&User{}).Create(map[string]any{"name": "Edsger", "ID": supplied, "id": "usr_01k226e0g1zzqdvk5vnacrgxv6"}).Error
 	if err == nil || !strings.Contains(err.Error(), "gives the primary key twice") {
