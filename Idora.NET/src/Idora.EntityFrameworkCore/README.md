@@ -21,9 +21,18 @@ db.Users.Add(new User { Name = "Ada" });   // Id is now "usr_01k2f9v8ta7m3x0qbrn
 dotnet add package Idora.NET.EntityFrameworkCore
 ```
 
-Targets `net8.0`, `net9.0` and `net10.0`, and depends on `Idora.NET` and
-`Microsoft.EntityFrameworkCore` **8.0** — the lowest release that runs on all three — so an
-application on EF Core 9 or 10 keeps its own version and nothing is forced on it. It is provider
+Targets `net8.0`, `net9.0`, `net10.0` and `net11.0`, and depends on `Idora.NET` and
+`Microsoft.EntityFrameworkCore`:
+
+| Your application | EF Core the package needs | Works with |
+| --- | --- | --- |
+| .NET 8, 9 or 10 | **8.0** or later | EF Core 8, 9 and 10 |
+| .NET 11 | **11.0** or later | EF Core 11 |
+
+An application on .NET 8 to 10 keeps its own EF Core version. On .NET 11 the package needs EF Core
+11, because EF Core 11 changed a constructor that code built for earlier releases calls, so a .NET 11
+application still on EF Core 10 is moved up to 11. The tests run against EF Core 10 on .NET 10 and
+EF Core 11 on .NET 11. It is provider
 neutral: SQL Server, PostgreSQL, SQLite and the rest all work, because everything it configures is
 part of EF Core itself.
 

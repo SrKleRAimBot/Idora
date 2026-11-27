@@ -127,3 +127,28 @@ func TestBoundsEncode(t *testing.T) {
 		}
 	}
 }
+
+// Scanning runs once per row, so it must not allocate beyond the identifier's own text: the
+// prefixed text is assembled in a buffer on the stack, and the one allocation is the string the
+// parsed ID keeps.
+func TestScanAllocatesOnlyTheText(t *testing.T) {
+	var u pgtype.UUID
+	if _, err := hex.Decode(u.Bytes[:], []byte(invoiceID[len("inv_"):])); err != nil {
+		t.Fatal(err)
+	}
+	u.Valid = true
+
+	var id idora.ID
+	dst := idorapgx.ScanUUID(&id, "inv")
+	n := testing.AllocsPerRun(1000, func() {
+		if err := dst.ScanUUID(u); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if n != 1 {
+		t.Errorf("ScanUUID allocated %v times per row, want 1", n)
+	}
+	if id.String() != invoiceID {
+		t.Errorf("scanned %q, want %q", id, invoiceID)
+	}
+}

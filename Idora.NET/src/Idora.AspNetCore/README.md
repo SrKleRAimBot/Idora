@@ -19,7 +19,7 @@ app.MapGet("/users/{id:idora(usr)}", (IdoraId id) => ...);   // /users/ord_01k2â
 dotnet add package Idora.NET.AspNetCore
 ```
 
-Targets `net8.0`, `net9.0` and `net10.0`, and depends on `Idora.NET` and the ASP.NET Core shared
+Targets `net8.0`, `net9.0`, `net10.0` and `net11.0`, and depends on `Idora.NET` and the ASP.NET Core shared
 framework. Trim- and AOT-safe.
 
 ### You may not need it

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <TargetFrameworks>net8.0;net9.0;net10.0;net11.0</TargetFrameworks>
 
     <!-- Enables trimming/AOT friendliness checks for consumers who publish trimmed. -->
     <IsTrimmable>true</IsTrimmable>
@@ -30,6 +30,7 @@
       * IdoraId serialises to JSON as a plain string, and has a TypeConverter, so it binds from routes,
         query strings and configuration with no setup.
       * New companion packages: Idora.NET.EntityFrameworkCore and Idora.NET.AspNetCore.
+      * Targets net11.0 as well as net8.0, net9.0 and net10.0.
 
       Purely additive; nothing existing changes behaviour.
 

@@ -2,11 +2,11 @@
 
   <PropertyGroup>
     <!--
-      Runs against EF Core 10 on .NET 10, while the package itself is built against EF Core 8. That is
-      the upward unification a consuming application on the newest EF Core gets, so it is the
-      combination worth proving.
+      Runs against EF Core 10 on .NET 10 and EF Core 11 on .NET 11, while the package itself is built
+      against EF Core 8. Those are the upward unifications a consuming application on a current EF
+      Core gets, so they are the combinations worth proving.
     -->
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
     <OutputType>Exe</OutputType>
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>

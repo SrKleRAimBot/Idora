@@ -87,6 +87,8 @@ func (d uuidDest) ScanUUID(v pgtype.UUID) error {
 		*d.dst = idora.ID{}
 		return nil
 	}
+	// A constant capacity that never escapes, so the buffer lives on the stack: the only
+	// allocation per row is the string the parsed ID keeps (see TestScanAllocatesOnlyTheText).
 	buf := make([]byte, 0, idora.MaxPrefixLen+1+32)
 	buf = append(buf, d.prefix...)
 	buf = append(buf, idora.Separator)

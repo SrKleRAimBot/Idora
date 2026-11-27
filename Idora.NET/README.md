@@ -49,7 +49,7 @@ in the order they were created, with no separate timestamp column and no seconda
 dotnet add package Idora.NET
 ```
 
-Targets `net8.0`, `net9.0` and `net10.0`. The only dependency is
+Targets `net8.0`, `net9.0`, `net10.0` and `net11.0`. The only dependency is
 `Microsoft.Extensions.DependencyInjection.Abstractions`, so that `AddIdora` can extend
 `IServiceCollection`; nothing else is pulled in.
 

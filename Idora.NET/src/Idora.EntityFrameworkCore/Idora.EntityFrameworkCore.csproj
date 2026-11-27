@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <TargetFrameworks>net8.0;net9.0;net10.0;net11.0</TargetFrameworks>
     <RootNamespace>Idora.EntityFrameworkCore</RootNamespace>
   </PropertyGroup>
 
@@ -20,6 +20,7 @@
       * UseIdoraIds: maps IdoraId-typed properties to string columns, with a value converter and comparer.
       * WhereCreatedBetween and WhereIdBetween: creation-time range queries over the key column, using
         IdoraId.LowerBound and UpperBound, that translate to SQL.
+      * Targets net8.0 to net11.0: EF Core 8 or later on net8.0 to net10.0, EF Core 11 on net11.0.
     </PackageReleaseNotes>
   </PropertyGroup>
 
