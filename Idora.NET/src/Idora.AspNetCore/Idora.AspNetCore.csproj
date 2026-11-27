@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0;net11.0</TargetFrameworks>
+    <RootNamespace>Idora.AspNetCore</RootNamespace>
+
+    <!-- Nothing here reflects over user types, so it is as trim- and AOT-safe as minimal APIs are. -->
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <!-- Version, authors, licence, icon and Source Link come from src/Directory.Build.props. -->
+  <PropertyGroup Label="Package metadata">
+    <IsPackable>true</IsPackable>
+    <PackageId>Idora.NET.AspNetCore</PackageId>
+    <Description>ASP.NET Core support for Idora.NET's prefixed, time-ordered identifiers such as usr_01k2f9v8ta7m3x0qbrn4dzeh5c. An idora route constraint ({id:idora} and {id:idora(usr)}) that matches only well-formed identifiers, and [IdoraId] and [IdoraIdFor] validation attributes that check a string property is an identifier for the right entity, against an explicit prefix or the registered one.</Description>
+    <PackageTags>idora;id;identifier;ulid;uuidv7;prefix;prefixed-id;aspnetcore;routing;route-constraint;validation;data-annotations;minimal-api;mvc</PackageTags>
+    <PackageReleaseNotes>
+      1.1.0 - First release, alongside Idora.NET 1.1.0.
+
+      * The idora route constraint, registered by AddIdoraRouteConstraint: {id:idora} matches any
+        well-formed identifier, {id:idora(usr)} only those with the prefix usr.
+      * [IdoraId] and [IdoraId("usr")] validate a string or IdoraId property; [IdoraIdFor&lt;User&gt;]
+        and [IdoraIdFor(typeof(User))] validate against the prefix registered for the entity.
+      * IdoraId itself needs nothing from this package to bind from routes, query strings, headers and
+        bodies in minimal APIs and MVC.
+    </PackageReleaseNotes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Idora/Idora.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -184,6 +184,191 @@ public sealed class ConformanceTests
         Should.NotThrow(() => options.RegisterEntity<Order>(second));
     }
 
+    public static TheoryData<string, string, string, string, long> ValidIds()
+    {
+        TheoryData<string, string, string, string, long> data = [];
+        foreach (JsonElement vector in Ids().GetProperty("valid").EnumerateArray())
+        {
+            data.Add(
+                vector.GetProperty("id").GetString()!,
+                vector.GetProperty("prefix").GetString()!,
+                vector.GetProperty("value").GetString()!,
+                vector.GetProperty("format").GetString()!,
+                vector.GetProperty("timestampMs").GetInt64());
+        }
+
+        return data;
+    }
+
+    public static TheoryData<string, string, string?> InvalidIds()
+    {
+        TheoryData<string, string, string?> data = [];
+        foreach (JsonElement vector in Ids().GetProperty("invalid").EnumerateArray())
+        {
+            data.Add(
+                vector.GetProperty("id").GetString()!,
+                vector.GetProperty("reason").GetString()!,
+                vector.TryGetProperty("expectedPrefix", out JsonElement expected) ? expected.GetString() : null);
+        }
+
+        return data;
+    }
+
+    public static TheoryData<long, string, string, string> Bounds()
+    {
+        TheoryData<long, string, string, string> data = [];
+        foreach (JsonElement vector in Ids().GetProperty("bounds").EnumerateArray())
+        {
+            data.Add(
+                vector.GetProperty("timestampMs").GetInt64(),
+                vector.GetProperty("format").GetString()!,
+                vector.GetProperty("lower").GetString()!,
+                vector.GetProperty("upper").GetString()!);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(ValidIds))]
+    public void Parse_ReadsEverySharedValidIdentifier(
+        string text,
+        string prefix,
+        string value,
+        string format,
+        long timestampMs)
+    {
+        // Act
+        IdoraId id = IdoraId.Parse(text);
+
+        // Assert
+        id.Prefix.ShouldBe(prefix);
+        id.Value.ShouldBe(value);
+        id.Format.ShouldBe(ToStrategy(format));
+        id.TimestampMilliseconds.ShouldBe(timestampMs);
+        id.ToString().ShouldBe(text);
+        IdoraId.IsValid(text).ShouldBeTrue();
+        IdoraId.IsValid(text, prefix).ShouldBeTrue();
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidIds))]
+    public void Parse_RejectsEverySharedInvalidIdentifierForTheStatedReason(
+        string text,
+        string reason,
+        string? expectedPrefix)
+    {
+        // Act
+        InvalidIdException exception = Should.Throw<InvalidIdException>(() =>
+            expectedPrefix is null ? IdoraId.Parse(text) : IdoraId.Parse(text, expectedPrefix));
+
+        // Assert
+        exception.Reason.ShouldBe(ToReason(reason));
+        exception.Text.ShouldBe(text);
+        exception.ExpectedPrefix.ShouldBe(expectedPrefix);
+        if (exception.Reason == InvalidIdReason.Prefix)
+        {
+            exception.InnerException.ShouldBeOfType<InvalidEntityPrefixException>();
+        }
+
+        bool valid = expectedPrefix is null ? IdoraId.IsValid(text) : IdoraId.IsValid(text, expectedPrefix);
+        valid.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Sort_ReproducesTheSharedNaturalOrderFromEveryRotationAndItsReverse()
+    {
+        // Arrange
+        IdoraId[] expected = Ids().GetProperty("ordered").EnumerateArray()
+            .Select(element => IdoraId.Parse(element.GetString()!))
+            .ToArray();
+
+        // Each rotation of the list and of its reverse puts every element in every position, and a
+        // seeded shuffle adds orders that no rotation produces.
+        List<IdoraId[]> permutations = [];
+        IdoraId[] reversed = expected.Reverse().ToArray();
+        for (int shift = 0; shift < expected.Length; shift++)
+        {
+            permutations.Add([.. expected[shift..], .. expected[..shift]]);
+            permutations.Add([.. reversed[shift..], .. reversed[..shift]]);
+        }
+
+        Random random = new(20250807);
+        for (int i = 0; i < 50; i++)
+        {
+            IdoraId[] shuffled = [.. expected];
+            random.Shuffle(shuffled);
+            permutations.Add(shuffled);
+        }
+
+        foreach (IdoraId[] permutation in permutations)
+        {
+            // Act
+            Array.Sort(permutation);
+
+            // Assert
+            permutation.ShouldBe(expected);
+        }
+    }
+
+    [Fact]
+    public void CompareTo_AgreesWithTheSharedNaturalOrderForEveryPair()
+    {
+        // Arrange
+        IdoraId[] ordered = Ids().GetProperty("ordered").EnumerateArray()
+            .Select(element => IdoraId.Parse(element.GetString()!))
+            .ToArray();
+
+        for (int i = 0; i < ordered.Length; i++)
+        {
+            for (int j = 0; j < ordered.Length; j++)
+            {
+                // Act
+                int comparison = ordered[i].CompareTo(ordered[j]);
+
+                // Assert
+                Math.Sign(comparison).ShouldBe(i.CompareTo(j), $"{ordered[i]} vs {ordered[j]}");
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Bounds))]
+    public void Bounds_MatchTheSharedVectorsAndParse(long timestampMs, string format, string lower, string upper)
+    {
+        // Arrange
+        IdGenerationStrategy strategy = ToStrategy(format);
+
+        // Act
+        IdoraId lowerBound = IdoraId.LowerBound("usr", timestampMs, strategy);
+        IdoraId upperBound = IdoraId.UpperBound("usr", timestampMs, strategy);
+
+        // Assert
+        lowerBound.ToString().ShouldBe("usr_" + lower);
+        upperBound.ToString().ShouldBe("usr_" + upper);
+        IdoraId.Parse(lowerBound.ToString()).TimestampMilliseconds.ShouldBe(timestampMs);
+        IdoraId.Parse(upperBound.ToString()).TimestampMilliseconds.ShouldBe(timestampMs);
+        IdoraId.Parse(lowerBound.ToString()).Format.ShouldBe(strategy);
+    }
+
+    private static IdGenerationStrategy ToStrategy(string format) => format switch
+    {
+        "ulid" => IdGenerationStrategy.Ulid,
+        "uuidv7" => IdGenerationStrategy.UuidV7,
+        _ => throw new InvalidOperationException($"Unknown format '{format}' in the shared vectors."),
+    };
+
+    private static InvalidIdReason ToReason(string reason) => reason switch
+    {
+        "noSeparator" => InvalidIdReason.NoSeparator,
+        "prefix" => InvalidIdReason.Prefix,
+        "value" => InvalidIdReason.Value,
+        "prefixMismatch" => InvalidIdReason.PrefixMismatch,
+        _ => throw new InvalidOperationException($"Unknown reason '{reason}' in the shared vectors."),
+    };
+
+    private static JsonElement Ids() => Vectors.GetProperty("ids");
+
     private static TheoryData<long, string, string> EncodingVectors(string key)
     {
         TheoryData<long, string, string> data = [];

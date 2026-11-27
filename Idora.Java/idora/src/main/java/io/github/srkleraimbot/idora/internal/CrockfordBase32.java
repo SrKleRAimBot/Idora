@@ -1,6 +1,7 @@
 package io.github.srkleraimbot.idora.internal;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 /**
  * Encodes the 128 bits of a ULID as 26 lowercase Crockford Base32 characters (specification
@@ -25,6 +26,12 @@ public final class CrockfordBase32 {
     public static final int ULID_LENGTH = 26;
 
     private static final byte[] ALPHABET_BYTES = ALPHABET.getBytes(StandardCharsets.US_ASCII);
+
+    /**
+     * Each ASCII character's value in the lowercase alphabet, or {@code -1}. Uppercase letters, and
+     * the letters the alphabet omits, are {@code -1}: Idora reads exactly what it writes.
+     */
+    private static final byte[] DECODE = decodeTable();
 
     private CrockfordBase32() {
     }
@@ -82,6 +89,21 @@ public final class CrockfordBase32 {
     }
 
     /**
+     * Returns the value of one character of the lowercase alphabet.
+     *
+     * <p>Strict, as parsing an identifier must be: only the 32 lowercase characters of
+     * {@link #ALPHABET} decode. Crockford's uppercase forms and his substitutions for the omitted
+     * letters ({@code i} and {@code l} for {@code 1}, {@code o} for {@code 0}) do not, because no
+     * conforming generator emits them.
+     *
+     * @param c the character
+     * @return its value, from 0 to 31, or {@code -1} if it is not in the lowercase alphabet
+     */
+    public static int decode(char c) {
+        return c < DECODE.length ? DECODE[c] : -1;
+    }
+
+    /**
      * Returns the 26-character encoding of a ULID as a string. A convenience for tests and
      * diagnostics; the generator writes straight into its own buffer instead.
      *
@@ -94,5 +116,14 @@ public final class CrockfordBase32 {
         byte[] buffer = new byte[ULID_LENGTH];
         encodeUlid(timestampMs, randomHigh, randomLow, buffer, 0);
         return new String(buffer, StandardCharsets.ISO_8859_1);
+    }
+
+    private static byte[] decodeTable() {
+        byte[] table = new byte[128];
+        Arrays.fill(table, (byte) -1);
+        for (int i = 0; i < ALPHABET.length(); i++) {
+            table[ALPHABET.charAt(i)] = (byte) i;
+        }
+        return table;
     }
 }

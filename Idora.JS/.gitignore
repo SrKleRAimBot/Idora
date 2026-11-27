@@ -2,3 +2,4 @@ node_modules/
 dist/
 build/
 *.tgz
+extensions/prisma/test/generated/

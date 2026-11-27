@@ -84,7 +84,7 @@ For each new value, given the current clock reading `now`:
 The consequence is that every value from one stream sorts strictly after the one before it, and a
 backwards clock step never produces an out-of-order value.
 
-The scope of a stream is chosen per language to avoid contention (§7), and must be documented.
+The scope of a stream is chosen per language to avoid contention (§8), and must be documented.
 
 ### 3.2 UUIDv7
 
@@ -178,9 +178,136 @@ The registry is exposed read-only:
 
 Returned prefixes carry no trailing separator.
 
-## 6. Errors
+## 6. Reading and comparing identifiers
 
-Every package reports the same three failures, as types (or error values) that callers can tell
+Generation is half of the job. Identifiers come back — in a route, a message, a foreign key — and
+code needs to check them, read them and put them in order without re-implementing the format. Every
+package therefore exposes a **parsed identifier**: an immutable value holding the prefix, the value,
+the value's format and the timestamp the value carries. It can be built from any conforming
+identifier, whichever strategy the local generator is configured with and whichever package minted
+it.
+
+### 6.1 Parsing
+
+Parsing is **strict**: it accepts exactly the text a conforming generator emits, and nothing else.
+There is no trimming, no case folding and no tolerance for hyphens. The checks run in this order and
+the first failure is reported:
+
+1. **Missing** — a null/nil/undefined input, reported the way the language reports a missing
+   argument, as in §2.
+2. **No separator** (`noSeparator`) — the text contains no `_`.
+3. **Prefix** (`prefix`) — everything before the **first** `_` fails §2. The report **should**
+   carry the §2 failure (as a cause, an inner error or a nested reason).
+4. **Value** (`value`) — everything after the first `_` is neither of:
+   - a **ULID**: exactly 26 characters, each from the lowercase Crockford alphabet (§3.1), the first
+     no greater than `7`;
+   - a **UUIDv7**: exactly 32 lowercase hexadecimal characters, character 12 being `7` (the version)
+     and character 16 one of `8`, `9`, `a`, `b` (the RFC variant).
+
+   The length decides which of the two rules applies, so an identifier never parses as both.
+5. **Prefix mismatch** (`prefixMismatch`) — only when the caller asked for a particular prefix: the
+   parsed prefix is not **exactly** (ordinally, case included) the prefix expected.
+
+An expected prefix comes from the caller, not from the input, so it is checked before any of these,
+against §2. An invalid one fails as *invalid entity prefix*, whatever the text holds, and from every
+form below, the non-failing parse and the validity check included: answering "not valid" would
+blame every identifier for a mistake in the calling code. Where a language reports such a mistake
+by panicking rather than with a value it returns (Idora.Rust's typed result, Idora.Go's boolean
+check), it panics with that error.
+
+A package offers, in its own idiom:
+
+- a **failing parse** that raises *invalid identifier* (§7), optionally taking an expected prefix;
+- a **non-failing parse** (`TryParse`, `undefined`, `Optional`, `(ID, error)`, `Result`);
+- a **validity check** returning a boolean, optionally taking an expected prefix;
+- a **registry-aware parse and check** that takes an entity type, looks up its registered prefix
+  (§5.3) and applies rule 5 with it. An unregistered entity type fails with *entity prefix not
+  registered*, not with *invalid identifier*: the identifier is not at fault.
+
+### 6.2 What a parsed identifier exposes
+
+| Member | Meaning |
+| --- | --- |
+| prefix | the text before the first `_`, exactly as written |
+| value | the text after it |
+| format | ULID or UUIDv7 — the same enumeration that selects the generation strategy, where there is one |
+| timestamp | the 48-bit millisecond count the value begins with, as an integer **and** as the language's UTC instant type |
+| text | the whole identifier, exactly the parsed input; this is its string form |
+
+A ULID's timestamp is the first 10 characters decoded as Crockford Base32 (§3.1); a UUIDv7's is its
+first 12 hexadecimal characters. Neither depends on the clock or the time zone of the reader.
+
+The largest 48-bit timestamp falls in the year 10889. Where the language's instant type cannot
+reach that far (.NET's `DateTimeOffset` ends with the year 9999), the integer form **must** stay
+exact, and the package **must** document what the instant form gives for a later timestamp. It
+**should not** throw from reading it: no clock produces such an identifier, but anyone can type
+one, and parsing has already accepted it.
+
+### 6.3 Equality and ordering
+
+Two parsed identifiers are **equal** when their texts are ordinally equal. Hashing follows equality.
+
+Parsed identifiers have a **natural order** that is chronological and total, and consistent with
+equality:
+
+1. by timestamp, oldest first;
+2. then by value, ordinally;
+3. then by prefix, ordinally.
+
+Ordering by timestamp first, rather than by text, is what makes identifiers of different entity
+types and different formats interleave in the order they were made: an order created after a user
+sorts after that user even though `ord` < `usr`. Within one format the value comparison agrees with
+the timestamp, so for ULIDs from one stream (§3.1) the natural order is exactly generation order.
+Ordering by value before prefix keeps an identifier next to its peers from the same millisecond.
+
+Each package offers, in its idiom (operators, `Comparable`, `Ord`, a `Compare` method, a comparator
+function):
+
+- the natural-order comparison, and **before** / **after** predicates that are strict in it;
+- a **timestamp comparison** that looks at the millisecond only, returning zero for two identifiers
+  minted in the same millisecond, and the corresponding **same-millisecond** predicate;
+- **created before** / **created after** predicates against an instant, strict at millisecond
+  precision: an instant's sub-millisecond part is truncated before comparing;
+- a **prefix test** that is exact and ordinal, case included.
+
+### 6.4 Range bounds
+
+Because a value starts with its timestamp, the identifiers minted for one prefix during one span of
+time are a contiguous range of strings. A package offers the **lowest and highest value** any
+conforming generator can produce for a given millisecond and format, and the identifiers
+`<prefix>_<bound>` built from them, so that a query such as
+
+```
+id >= lower('usr', from) AND id <= upper('usr', to)
+```
+
+selects every `usr` identifier minted in `[from, to]` without parsing a single row.
+
+| Format | Lowest value | Highest value |
+| --- | --- | --- |
+| ULID | the 10 timestamp characters, then sixteen `0` | the 10 timestamp characters, then sixteen `z` |
+| UUIDv7 | the 12 timestamp hex characters, then `7000` `8000` and twelve `0` | the 12 timestamp hex characters, then `7fff` `bfff` and twelve `f` |
+
+Both bounds are themselves valid values, and therefore parse. A timestamp outside `0 … 2⁴⁸ − 1`
+fails the way the language reports an out-of-range argument, and the prefix of a bound identifier is
+validated as in §5.2.
+
+Range bounds compare correctly only against identifiers of the **same prefix and format**, as plain
+strings. That is the shape of a database column, which holds one entity type in one format.
+
+"As plain strings" means an ordinal comparison: character by character, by code. A binary or `C`
+collation is one, and is what an identifier column should use. Any other collation is correct only
+if it orders the digits and the Crockford alphabet exactly as ordinal comparison does, and many
+linguistic collations do not. Czech and Slovak treat `ch` as one letter, Danish `aa`, Hungarian
+several digraphs; Lithuanian and Latvian sort `y` before `j`, Estonian `z` before `t`. A **numeric**
+("natural sort") collation compares a run of digits as one number, so for the millisecond `1` it
+puts the lower ULID bound `…00000000010000000000000000` after the upper bound
+`…0000000001zzzzzzzzzzzzzzzz`. Each can put a bound on the wrong side of a row, and the range
+silently misses it. Packages that build range queries **must** document this requirement.
+
+## 7. Errors
+
+Every package reports the same four failures, as types (or error values) that callers can tell
 apart, sharing a common base where the language has one:
 
 | Failure | Raised when | Carries |
@@ -188,17 +315,26 @@ apart, sharing a common base where the language has one:
 | invalid entity prefix | §2 fails | the prefix |
 | duplicate entity prefix | §4.3 fails | the prefix, the entity type being registered, the conflicting entity type |
 | entity prefix not registered | §5.1 or §5.3 for an unregistered type | the entity type |
+| invalid identifier | §6.1 fails | the text, the reason (`noSeparator`, `prefix`, `value`, `prefixMismatch`) and, for `prefixMismatch`, the expected prefix |
 
-Messages say what went wrong **and how to fix it**.
+Messages say what went wrong **and how to fix it**. Parsing hands untrusted input to the same
+errors, so a message **must not** repeat input of unbounded length: quote at most the first 64
+characters of a rejected text or prefix, anywhere in the error, including a wrapped cause. The
+error's own properties keep the full text.
 
-## 7. Concurrency
+*Invalid identifier* was added after the first release, and a package **must not** let it break code
+written against that release. Where the common base is a closed hierarchy that callers may match
+exhaustively — Idora.Java's sealed `IdoraException` — the new error stands beside it instead, as the
+language's ordinary bad-argument type, and the package documents why.
+
+## 8. Concurrency
 
 A built generator is immutable and safe to share across every thread, goroutine, task or worker in
 the process. Generation **must not** take a process-wide lock on the hot path. Per-thread state
 (or a short, per-generator critical section where the language has no thread-local storage) is
 expected; whichever is used determines the scope of ULID monotonicity and is documented.
 
-## 8. Conformance vectors
+## 9. Conformance vectors
 
 [`test-vectors.json`](test-vectors.json) contains:
 
@@ -211,10 +347,14 @@ expected; whichever is used determines the scope of ULID monotonicity and is doc
 | `prefixes.invalid` | prefixes that must be rejected, with the `reason` (`empty`, `tooLong`, `separator`, `character`) and offending `index` |
 | `prefixes.collidingPairs` | pairs that must collide when registered to two different types |
 | `prefixes.distinctPairs` | pairs that must not |
+| `ids.valid` | identifiers that must parse, with the `prefix`, `value`, `format` (`ulid`, `uuidv7`) and `timestampMs` they must yield |
+| `ids.invalid` | identifiers that must be rejected, with the `reason` (`noSeparator`, `prefix`, `value`, `prefixMismatch`) and, where given, the `expectedPrefix` passed to the parse |
+| `ids.ordered` | identifiers listed in their natural order (§6.3); sorting any permutation must reproduce the list |
+| `ids.bounds` | the `lower` and `upper` values (§6.4) for `timestampMs` in `format` |
 
 Random fields are big-endian hexadecimal.
 
-## 9. Performance
+## 10. Performance
 
 Each package ships a benchmark that measures, at minimum, generation for a registered type and
 with an ad-hoc prefix, for both formats, against the language's nearest built-in identifier

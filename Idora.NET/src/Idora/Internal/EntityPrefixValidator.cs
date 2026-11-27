@@ -38,9 +38,52 @@ internal static class EntityPrefixValidator
     {
         ArgumentNullException.ThrowIfNull(prefix, parameterName);
 
+        if (!IsValid(prefix))
+        {
+            throw Describe(prefix);
+        }
+    }
+
+    /// <summary>
+    /// Reports whether <paramref name="prefix"/> is a valid entity prefix, without throwing and
+    /// without allocating.
+    /// </summary>
+    /// <param name="prefix">The prefix to check.</param>
+    /// <returns><see langword="true"/> if every rule is satisfied; otherwise <see langword="false"/>.</returns>
+    /// <remarks>
+    /// Parsing an identifier checks its prefix on every call, including from
+    /// <see cref="IdoraId.TryParse(string, out IdoraId)"/>, where an exception would be the wrong
+    /// way to say no. The full explanation is built by <see cref="Describe"/>, and only once the
+    /// answer is known to be no.
+    /// </remarks>
+    internal static bool IsValid(ReadOnlySpan<char> prefix)
+    {
+        if (prefix.Length is 0 or > MaxLength)
+        {
+            return false;
+        }
+
+        foreach (char character in prefix)
+        {
+            if (!char.IsAsciiLetterOrDigit(character))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Builds the exception explaining which rule <paramref name="prefix"/> breaks.
+    /// </summary>
+    /// <param name="prefix">A prefix that <see cref="IsValid"/> has already rejected.</param>
+    /// <returns>An exception reporting the first rule that fails, in the order the rules are listed.</returns>
+    internal static InvalidEntityPrefixException Describe(string prefix)
+    {
         if (prefix.Length == 0)
         {
-            throw new InvalidEntityPrefixException(
+            return new InvalidEntityPrefixException(
                 "An entity prefix cannot be empty. Supply 1 to " + MaxLength
                 + " ASCII letters or digits, for example \"usr\".",
                 prefix);
@@ -48,11 +91,12 @@ internal static class EntityPrefixValidator
 
         if (prefix.Length > MaxLength)
         {
-            throw new InvalidEntityPrefixException(
+            return new InvalidEntityPrefixException(
                 string.Format(
                     CultureInfo.InvariantCulture,
                     "The entity prefix '{0}' is {1} characters long; the maximum is {2}.",
-                    prefix,
+                    // Shortened: a prefix parsed out of an identifier is untrusted input of any length.
+                    InvalidIdException.Quote(prefix),
                     prefix.Length,
                     MaxLength),
                 prefix);
@@ -67,7 +111,7 @@ internal static class EntityPrefixValidator
                 continue;
             }
 
-            throw new InvalidEntityPrefixException(
+            return new InvalidEntityPrefixException(
                 string.Format(
                     CultureInfo.InvariantCulture,
                     character == Separator
@@ -80,5 +124,7 @@ internal static class EntityPrefixValidator
                     i),
                 prefix);
         }
+
+        throw new ArgumentException("The prefix is valid, so there is nothing to describe.", nameof(prefix));
     }
 }

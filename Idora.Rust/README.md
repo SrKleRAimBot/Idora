@@ -10,13 +10,13 @@ inv_01k2f9v8tc4h8w6zqm1vptb2j9
 
 A prefix you register once, an underscore, and a lowercase [ULID](https://github.com/ulid/spec) or
 [UUIDv7](https://www.rfc-editor.org/rfc/rfc9562). No magic strings at the call site, no
-configuration file, and **no dependencies at all** — not even dev-dependencies.
+configuration file, and by default **no dependencies at all** — not even dev-dependencies.
 
 `idora` is the Rust member of the [Idora](https://github.com/SrKleRAimBot/Idora#readme) family.
 Every member implements the same
 [specification](https://github.com/SrKleRAimBot/Idora/blob/main/spec/SPECIFICATION.md) and passes
 the same [conformance vectors](https://github.com/SrKleRAimBot/Idora/blob/main/spec/test-vectors.json),
-so an identifier minted here can be sorted, split and validated by any of the others:
+so an identifier minted here can be parsed, sorted and validated by any of the others:
 
 | Package | Language |
 | --- | --- |
@@ -56,7 +56,23 @@ in the order they were created.
 cargo add idora
 ```
 
-Edition 2024, MSRV **1.85**. No dependencies, no features, no build script.
+Edition 2024, MSRV **1.85**. No dependencies and no build script. Two optional features, both off
+by default, integrate with the crates that need to see inside an identifier:
+
+| Feature | Adds | Needs |
+| --- | --- | --- |
+| `serde` | `Serialize` / `Deserialize` for `Id` and `TypedId`, as strings, validated on the way in | `serde` 1 |
+| `sqlx` | `Type` / `Encode` / `Decode` for `Id` and `TypedId`, for every sqlx database | `sqlx` 0.9, Rust 1.94 |
+
+```bash
+cargo add idora --features serde,sqlx
+```
+
+And one companion crate, in this repository:
+
+| Crate | What it does |
+| --- | --- |
+| [`idora-axum`](https://github.com/SrKleRAimBot/Idora/tree/main/Idora.Rust/crates/idora-axum) | axum extractors: `IdFor<User>` parses `/users/{id}` and checks it is a user's identifier, answering `400` or `404` otherwise; Idora request ids for tower-http |
 
 ---
 
@@ -376,27 +392,23 @@ fn main() -> Result<(), idora::InvalidPrefixError> {
 
 Each method returns the one error it can produce, and both convert into `idora::Error` with `?`.
 
+If you would rather have the parts than the text, `generate_id::<T>()` and
+`generate_id_with_prefix(prefix)` return an [`Id`](#reading-identifiers-back) instead of a
+`String`. An `Id` lives on the stack, so these cost **no allocation at all**.
+
 ## Reading prefixes back
 
-The registry is readable, for when you need the prefix itself rather than a whole identifier —
-checking that an identifier belongs to the entity a route expects, for instance:
+The registry is readable, for when you need the prefix itself rather than a whole identifier:
 
 ```rust
 use idora::Idora;
 
 struct Order;
 
-fn is_an_order_id(ids: &Idora, id: &str) -> bool {
-    match (ids.get_prefix::<Order>(), id.split_once('_')) {
-        (Some(expected), Some((prefix, _))) => prefix == expected,
-        _ => false,
-    }
-}
-
 fn main() -> Result<(), idora::Error> {
     let ids = Idora::builder().register::<Order>("ord")?.build();
-    assert!(is_an_order_id(&ids, &ids.generate::<Order>()?));
-    assert!(!is_an_order_id(&ids, "usr_01k2f9v8ta7m3x0qbrn4dzeh5c"));
+    assert_eq!(ids.prefix_of::<Order>()?, "ord");
+    assert_eq!(ids.get_prefix::<String>(), None);
     Ok(())
 }
 ```
@@ -408,7 +420,199 @@ fn main() -> Result<(), idora::Error> {
 | `get_prefix_by_type_id(TypeId)` | `Option<&str>`, for code that only has the type at run time |
 | `registrations()` | `&[Registration]` in registration order: `type_id()`, `type_name()`, `prefix()` |
 
-Returned prefixes never include the separator.
+Returned prefixes never include the separator. To check that an identifier belongs to an entity,
+don't compare prefixes by hand: `ids.is_id_for::<Order>(text)` does it, and checks the rest of the
+identifier too.
+
+---
+
+## Reading identifiers back
+
+Identifiers come back — in a route, a message, a foreign key — and need checking, reading and
+ordering. `Id` is a parsed identifier: it holds the prefix, the value, the format and the timestamp
+the value begins with, and can be built from any identifier any Idora package mints, in either
+format, whichever strategy your own generator uses.
+
+```rust
+use std::time::{Duration, UNIX_EPOCH};
+use idora::{Id, Strategy};
+
+fn main() -> Result<(), idora::InvalidIdError> {
+    let id: Id = "usr_01k226e0g0008j4ct4ank7f24s".parse()?;
+
+    assert_eq!(id.prefix(), "usr");
+    assert_eq!(id.value(), "01k226e0g0008j4ct4ank7f24s");
+    assert_eq!(id.format(), Strategy::Ulid);
+    assert_eq!(id.timestamp_ms(), 1_754_568_000_000);               // 2025-08-07T12:00:00Z
+    assert_eq!(id.created_at(), UNIX_EPOCH + Duration::from_millis(1_754_568_000_000));
+    assert_eq!(id.as_str(), "usr_01k226e0g0008j4ct4ank7f24s");      // also Display, AsRef<str>
+    Ok(())
+}
+```
+
+An `Id` is 64 bytes on the stack — the text inline, beside the decoded timestamp — so it is `Copy`,
+and parsing, copying and comparing it never touch the heap.
+
+### Parsing is strict
+
+`Id::parse` accepts exactly what a conforming generator emits and nothing else: no trimming, no
+case folding, no hyphenated UUIDs. An identifier that only works because something was lenient
+about it is a bug waiting for the one consumer that isn't. The first failing check is reported:
+
+| Reason | When |
+| --- | --- |
+| `InvalidIdReason::NoSeparator` | there is no `_` |
+| `InvalidIdReason::Prefix(InvalidPrefixError)` | the text before the first `_` is not a valid prefix (the prefix error is also the `source()`) |
+| `InvalidIdReason::Value` | the text after it is not a 26-character lowercase ULID or a 32-character lowercase UUIDv7 |
+| `InvalidIdReason::PrefixMismatch { expected }` | it is well formed, but not with the prefix you asked for |
+
+| Method | Returns |
+| --- | --- |
+| `Id::parse(text)`, `text.parse::<Id>()`, `Id::try_from(text)` | `Result<Id, InvalidIdError>` |
+| `Id::parse_with_prefix(text, "usr")` | `Result<Id, InvalidIdError>`, the prefix compared exactly, case included |
+| `Id::is_valid(text)`, `Id::is_valid_with_prefix(text, "usr")` | `bool`, and never allocates |
+| `ids.parse::<User>(text)` | `Result<Id, idora::Error>`, with the prefix registered for `User` |
+| `ids.is_id_for::<User>(text)` | `Result<bool, PrefixNotRegisteredError>` |
+
+The registry-aware pair is the one to reach for when an identifier arrives that is supposed to name
+a particular entity. An unregistered type fails with `PrefixNotRegistered` rather than "invalid
+identifier": the identifier is not at fault.
+
+```rust
+use idora::{Error, Idora, InvalidIdReason};
+
+struct User;
+struct Order;
+
+fn main() -> Result<(), idora::Error> {
+    let ids = Idora::builder()
+        .register::<User>("usr")?
+        .register::<Order>("ord")?
+        .build();
+
+    let user = ids.parse::<User>("usr_01k226e0g0008j4ct4ank7f24s")?;
+    assert_eq!(user.prefix(), "usr");
+
+    match ids.parse::<Order>("usr_01k226e0g0008j4ct4ank7f24s") {
+        Err(Error::InvalidId(e)) => {
+            assert!(matches!(e.reason(), InvalidIdReason::PrefixMismatch { .. }));
+            println!("{e}");
+            // The identifier 'usr_01k226e0g0008j4ct4ank7f24s' has the prefix 'usr', but an
+            // identifier with the prefix 'ord' was expected. Prefixes are compared exactly, case
+            // included; check that the identifier refers to the right kind of entity.
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+    Ok(())
+}
+```
+
+The text being parsed usually comes from outside, so messages quote it with control characters
+escaped and anything past 64 characters cut off. `InvalidIdError::text()` has it untouched.
+
+### Ordering and comparing
+
+Two `Id`s are equal when their text is equal. Their order is **chronological**, not textual: by
+timestamp, then value, then prefix. That is what makes identifiers of different entities and
+different formats interleave in the order they were made — an order created after a user sorts
+after that user, even though `ord` < `usr`:
+
+```rust
+use std::time::{Duration, UNIX_EPOCH};
+use idora::Id;
+
+fn main() -> Result<(), idora::InvalidIdError> {
+    let user: Id = "usr_01k226e0g0008j4ct4ank7f24s".parse()?;
+    let order: Id = "ord_01k226e0g1zzqdvk5vnacrgxv6".parse()?;     // a millisecond later
+    let invoice: Id = "inv_0198846702007011a233445566778899".parse()?; // UUIDv7, same ms as user
+
+    let mut all = vec![order, user, invoice];
+    all.sort();
+    assert_eq!(all, [invoice, user, order]);
+
+    assert!(user.is_before(&order) && order.is_after(&user));
+    assert!(user.same_millisecond(&invoice));           // cmp_timestamp is Ordering::Equal
+    assert!(user.has_prefix("usr") && !user.has_prefix("USR"));
+
+    let minted = UNIX_EPOCH + Duration::from_millis(1_754_568_000_000);
+    assert!(user.created_before(minted + Duration::from_millis(1)));
+    assert!(!user.created_after(minted + Duration::from_micros(500))); // same millisecond
+    Ok(())
+}
+```
+
+`created_before` and `created_after` are strict and compare at millisecond precision. For ULIDs from
+one thread the natural order is exactly generation order. Because it differs from string order,
+`Id` deliberately does not implement `Borrow<str>`; compare it with a string directly
+(`id == "usr_…"`) or through `as_str()`.
+
+### Time-window queries without parsing
+
+A value starts with its timestamp, so every identifier one prefix gets during a span of time is a
+contiguous range of strings. `Id::lower_bound` and `Id::upper_bound` give you its ends:
+
+```rust
+use std::time::{Duration, SystemTime};
+use idora::{Id, Strategy};
+
+fn main() -> Result<(), idora::InvalidPrefixError> {
+    let to = SystemTime::now();
+    let from = to - Duration::from_secs(24 * 60 * 60);
+
+    let lower = Id::lower_bound("usr", from, Strategy::Ulid)?; // usr_01k2…0000000000000000
+    let upper = Id::upper_bound("usr", to, Strategy::Ulid)?;   // usr_01k2…zzzzzzzzzzzzzzzz
+
+    // SELECT * FROM users WHERE id >= $1 AND id <= $2   -- an index range scan
+    let _ = (lower.as_str(), upper.as_str());
+    Ok(())
+}
+```
+
+The bounds are the lowest and highest identifiers any conforming generator can mint in those
+milliseconds, and are valid identifiers themselves. They compare correctly only as plain strings,
+against identifiers of the same prefix and format — the shape of a database column.
+`Id::lower_bound_value` and `upper_bound_value` give the bare values, for a column that stores
+UUIDv7s without their prefix. A time before 1970 or after the year 10889 is out of range and
+panics; the prefix is validated, as for `generate_with_prefix`.
+
+The database compares them with the column's collation, so give the column a binary or `C`
+collation. A linguistic collation is safe only if it orders the identifier's characters exactly as
+a byte comparison does, and many do not: Czech and Slovak treat `ch` as one letter, Danish `aa`,
+Lithuanian sorts `y` before `j`, Estonian `z` before `t`, and a numeric ("natural sort")
+collation compares runs of digits as numbers. Any of them can put a bound on the wrong side of a
+row, so the range silently misses it. See
+[§6.4 of the specification](https://github.com/SrKleRAimBot/Idora/blob/main/spec/SPECIFICATION.md#64-range-bounds).
+
+### Typed identifiers
+
+`TypedId<E>` is an `Id` known, in the type system, to carry `E::PREFIX`. A function that takes a
+`TypedId<User>` cannot be handed an order's identifier, and has nothing left to check:
+
+```rust
+use idora::{Entity, TypedId};
+
+struct User;
+impl Entity for User {
+    const PREFIX: &'static str = "usr";
+}
+
+fn deactivate(user: TypedId<User>) -> String {
+    format!("UPDATE users SET active = false WHERE id = '{user}'")
+}
+
+fn main() -> Result<(), idora::InvalidIdError> {
+    let user: TypedId<User> = "usr_01k226e0g0008j4ct4ank7f24s".parse()?;
+    assert_eq!(user.timestamp_ms(), 1_754_568_000_000); // Deref<Target = Id>
+    deactivate(user);
+
+    assert!("ord_01k226e0g1zzqdvk5vnacrgxv6".parse::<TypedId<User>>().is_err());
+    Ok(())
+}
+```
+
+It costs what an `Id` costs, is `Copy + Send + Sync` whatever `E` is, and converts to and from `Id`
+(`TypedId::from_id`, `Id::from`). The prefix is the one `E` *declares*, so it needs no generator;
+for types registered with `register::<T>("…")`, check against the registry with `ids.parse::<T>()`.
 
 ---
 
@@ -428,7 +632,8 @@ The timestamp comes first, which is what makes the identifiers sort by creation 
 strings. UUIDv7 has the same shape: 48 bits of timestamp, the version and variant bits, then 74
 bits of randomness, printed as 32 hexadecimal characters instead of 26 Base32 ones.
 
-To split one apart, split on the **first** underscore; the prefix can never contain one:
+The prefix can never contain an underscore, so splitting on the **first** one always recovers the
+two parts. `Id::parse` does that and checks both; by hand it is:
 
 ```rust
 fn main() {
@@ -465,10 +670,12 @@ are reading.
 | --- | --- | --- | --- |
 | `InvalidPrefixError` | A prefix is empty, longer than 16 characters, or contains something other than an ASCII letter or digit | `register*` (start-up), `generate_with_prefix`, `validate_prefix` | Use 1–16 letters and digits, no underscore |
 | `DuplicatePrefixError` | One prefix for two types (ignoring ASCII case), or one type registered twice — by two `register` calls, an `Entity` declaration and a `register` call, or two `register_entities` calls | `register*` (start-up) | Give each type its own prefix, and register it exactly once |
-| `PrefixNotRegisteredError` | A type with no registered prefix | `generate::<T>`, `prefix_of::<T>` | Register the type, or use `generate_with_prefix` |
+| `PrefixNotRegisteredError` | A type with no registered prefix | `generate::<T>`, `prefix_of::<T>`, `parse::<T>`, `is_id_for::<T>` | Register the type, or use `generate_with_prefix` |
+| `InvalidIdError` | Text that is not an identifier, or is one with the wrong prefix | `Id::parse*`, `TypedId::parse`, `str::parse`, `parse::<T>` (inside `Error::InvalidId`) | Pass the identifier exactly as generated; check it names the right entity |
 
 `idora::Error` is a `#[non_exhaustive]` enum with one variant per error, and every specific error
-converts into it. All of them implement `Display` and `std::error::Error`, and messages say what
+converts into it. (`Error::InvalidId` is new in 1.1; because the enum is `#[non_exhaustive]`, adding
+it breaks no `match`.) All of them implement `Display` and `std::error::Error`, and messages say what
 went wrong **and how to fix it**. Each one also carries the details as accessors, not just in the
 message:
 
@@ -523,7 +730,8 @@ character in `"café"` is at index 3.
 ## Performance
 
 Generating an identifier costs **one allocation** — the `String` that comes back, sized exactly —
-and **about 50 nanoseconds**. Measured with the crate's own benchmark on rustc 1.99.1, Apple
+and **about 50 nanoseconds**. As an `Id`, it costs no allocation at all, and parsing one back costs
+about 15. Measured with the crate's own benchmark on rustc 1.99.1, Apple
 M-series (14 cores), macOS:
 
 | Case | Median | Ratio |
@@ -543,6 +751,18 @@ M-series (14 cores), macOS:
 
 Multi-threaded numbers are wall-clock time divided by identifiers produced across all threads, and
 are noisier than the single-threaded ones: past a few threads the system allocator dominates.
+
+| Reading and `Id` | Median |
+| --- | ---: |
+| `generate_id::<T>()` — ULID, no allocation | 40.3 ns |
+| `Id::parse` — ULID | 14.7 ns |
+| `Id::parse` — UUIDv7 | 25.2 ns |
+| `Id::is_valid` on a malformed identifier | 5.6 ns |
+| `ids.parse::<T>()` — registered prefix | 20.2 ns |
+
+Parsing is one pass over at most 49 bytes with a lookup table per alphabet, and never allocates
+unless it fails — a counting-allocator test holds `Id::parse`, `is_valid`, `ids.parse::<T>()`,
+comparisons and `generate_id` to zero allocations.
 
 The baselines are what you would write by hand without a crate: there is no UUID in `std`, and
 Idora does not depend on the `uuid` crate even to benchmark against it. Reproduce the numbers with:
@@ -645,18 +865,21 @@ around it. But the timestamp is plainly readable, and identifiers are meant to a
 and support tickets. **Treat them as public.** Never use one as a bearer token or a password-reset
 secret.
 
-**Why `String` and not an `Id<User>` newtype?**
+**Why does `generate` return a `String` and not an `Id`?**
 Because identifiers cross every boundary — JSON, SQL, logs, other languages — as strings, and a
-`String` works with every crate you already use (serde, sqlx, diesel, axum extractors) with no
-integration features for this crate to maintain. If you want a typed wrapper, a one-line newtype
-around the `String` in your own code is the right place for it.
+`String` works with every crate you already use without a feature flag. `generate_id` returns an
+`Id` for when you want the parts, and `Id` and `TypedId<E>` are the types to take *in*, where text
+from outside needs checking.
 
 **Does it support serde / sqlx / diesel?**
-There is nothing to support: the output is a `String`. That is also how Idora stays at zero
-dependencies.
+serde and sqlx through the [`serde` and `sqlx` features](#cargo-features), and axum through
+[`idora-axum`](https://github.com/SrKleRAimBot/Idora/tree/main/Idora.Rust/crates/idora-axum). For
+anything else, the generated `String` already works everywhere, and an `Id` converts from it with
+`parse` and back with `as_str`. diesel's `ToSql`/`FromSql` could only live in this crate too (the
+orphan rule); it is not there yet because a `String` column plus `Id::parse` covers it.
 
 **Are identifiers case-sensitive?**
-Compare them as ordinary strings. Generated values are always lowercase, and neither alphabet has
+Yes. Compare them as ordinary strings, or as `Id`s. Generated values are always lowercase, and neither alphabet has
 two characters that differ only by case. Your prefix is emitted exactly as you registered it, so
 registering `USR` gives you `USR_01k2f9…` — and `usr` and `USR` cannot both be registered.
 
@@ -681,20 +904,132 @@ prefix alongside whatever run-time handle you have.
 
 ---
 
+## Cargo features
+
+Both are off by default. They live in this crate because Rust's orphan rule allows a foreign trait
+to be implemented for `Id` only here or in the trait's own crate.
+
+### `serde`
+
+`Id` and `TypedId<E>` serialize as their text and deserialize from it, through the strict parse:
+a malformed identifier, or another entity's in a `TypedId<E>`, fails at the boundary instead of
+becoming a value that fails later.
+
+```rust,ignore
+use idora::{Entity, Id, TypedId};
+use serde::{Deserialize, Serialize};
+
+struct User;
+impl Entity for User {
+    const PREFIX: &'static str = "usr";
+}
+
+#[derive(Serialize, Deserialize)]
+struct Order {
+    id: Id,
+    customer: TypedId<User>,
+}
+
+let order: Order = serde_json::from_str(
+    r#"{ "id": "ord_01k226e0g1zzqdvk5vnacrgxv6", "customer": "usr_01k226e0g0008j4ct4ank7f24s" }"#,
+)?;
+assert!(serde_json::from_str::<Order>(
+    r#"{ "id": "ord_01k226e0g1zzqdvk5vnacrgxv6", "customer": "ord_01k226e0g1zzqdvk5vnacrgxv6" }"#,
+).is_err());
+```
+
+### `sqlx`
+
+`Id` and `TypedId<E>` implement sqlx 0.9's `Type`, `Encode` and `Decode` for **every** database,
+by deferring to the driver's own implementations for `str`. They bind as text parameters and
+decode from any column a `&str` decodes from (`TEXT`, `VARCHAR`, `CHAR(n)`, …), through the strict
+parse:
+
+```rust,ignore
+use idora::{Id, TypedId};
+
+#[derive(sqlx::FromRow)]
+struct UserRow {
+    id: TypedId<User>,   // a column holding an order's identifier is a decode error
+    referrer: Option<Id>,
+}
+
+sqlx::query("INSERT INTO users (id, referrer) VALUES ($1, $2)")
+    .bind(ids.generate_id::<User>()?)
+    .bind(None::<Id>)
+    .execute(&pool)
+    .await?;
+
+let recent: Vec<UserRow> = sqlx::query_as("SELECT * FROM users WHERE id >= $1 ORDER BY id")
+    .bind(Id::lower_bound("usr", since, Strategy::Ulid)?)
+    .fetch_all(&pool)
+    .await?;
+```
+
+The feature depends on `sqlx` itself with no default features, not on the semver-exempt
+`sqlx-core`, and needs Rust 1.94 because sqlx 0.9 does; the rest of the crate keeps its 1.85 MSRV.
+It tracks sqlx 0.9; a later sqlx will arrive under a feature of its own, so upgrading Idora never
+breaks a build.
+
+Both examples are marked `ignore` here only because the core crate's doctests cannot depend on
+`serde_json` or a database; the same code is compiled and run, against serde_json and an in-memory
+SQLite, in `crates/idora-tests`.
+
+---
+
 ## Contributing
 
+`Idora.Rust` is a Cargo workspace: the `idora` crate at the root, `idora-axum` in `crates/`, and an
+unpublished `idora-tests` crate holding the tests for the optional features.
+
 ```bash
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test                 # unit, integration, conformance, allocation and doc tests
-cargo doc --no-deps
-cargo bench
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test -p idora                       # the core, dependency-free: unit, integration,
+                                          # conformance, allocation and doc tests
+cargo test --workspace --all-features     # plus serde, sqlx and idora-axum
+cargo doc --workspace --no-deps --all-features
+cargo bench -p idora
 ```
 
 The conformance suite reads the shared vectors from `../spec/test-vectors.json` in the
 [Idora repository](https://github.com/SrKleRAimBot/Idora), so run the tests from a full checkout.
-The test and benchmark harnesses — including the JSON parser the conformance suite uses — are
-hand-written on `std`, to keep the dependency count at zero.
+The core's test and benchmark harnesses — including the JSON parser the conformance suite uses —
+are hand-written on `std`, so `cargo test -p idora` builds nothing but `idora`. The tests that need
+`serde_json`, `sqlx` or `tokio` live in `crates/idora-tests` instead, because a crate's
+dev-dependencies are always compiled for its tests.
+
+## Releasing
+
+Pushing an `Idora.Rust/v*` tag tests, packages and publishes every published crate in the
+workspace to crates.io, `idora` first and then the crates that depend on it. The tag must match the
+version in every crate's `Cargo.toml`:
+
+```bash
+git tag Idora.Rust/v1.1.0
+git push origin Idora.Rust/v1.1.0
+```
+
+Publishing uses crates.io [trusted publishing](https://crates.io/docs/trusted-publishing): the
+workflow exchanges a short-lived GitHub OIDC token for a crates.io token, so there is no long-lived
+secret to store. A version already on crates.io is skipped, so a release that stopped part-way can
+be finished by running the workflow again. Running it manually from the Actions tab is a dry run.
+
+### Releasing a new crate
+
+Trusted publishing is configured per crate, and crates.io accepts it only for a crate that already
+exists, so a new crate's first version is published by hand. The workflow checks every crate
+before it publishes anything, and stops with nothing published if one has never been released.
+For a new crate, here `idora-axum`:
+
+1. Bump every crate to the release version and push the tag. The workflow stops at the check.
+2. From the tagged commit, publish anything that is not yet on crates.io by hand, in order, with an
+   API token: `cargo publish -p idora` if this release's `idora` is not out yet, then
+   `cargo publish -p idora-axum`.
+3. On crates.io, open the new crate's settings and add a trusted publisher: repository
+   `SrKleRAimBot/Idora`, workflow `release-rust.yml`.
+4. Re-run the workflow. It finds every version already published, skips them, and creates the
+   GitHub release; every later release then runs from the tag alone.
 
 ## License
 

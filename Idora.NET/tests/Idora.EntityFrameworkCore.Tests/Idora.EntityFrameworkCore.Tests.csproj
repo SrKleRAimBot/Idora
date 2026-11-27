@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      Runs against EF Core 10 on .NET 10 and EF Core 11 on .NET 11, while the package itself is built
+      against EF Core 8. Those are the upward unifications a consuming application on a current EF
+      Core gets, so they are the combinations worth proving.
+    -->
+    <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Idora.EntityFrameworkCore/Idora.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+
+</Project>

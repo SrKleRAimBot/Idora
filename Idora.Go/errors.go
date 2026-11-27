@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 )
 
-// Sentinel errors. Every error this package returns matches exactly one of them under
-// [errors.Is]; use [errors.As] with the corresponding typed error for the details.
+// Sentinel errors. Every error this package returns matches one of them under [errors.Is]; use
+// [errors.As] with the corresponding typed error for the details. An [*InvalidIDError] whose
+// prefix was at fault also matches [ErrInvalidPrefix], through the [*InvalidPrefixError] it wraps.
 var (
 	// ErrInvalidPrefix reports a prefix that is empty, longer than [MaxPrefixLen] characters, or
 	// contains something other than an ASCII letter or digit. See [*InvalidPrefixError].
@@ -26,6 +29,10 @@ var (
 	// from an embedded field rather than declared on the type itself. Declarations are not
 	// inherited. See [*PromotedPrefixError].
 	ErrPromotedPrefix = errors.New("idora: promoted IDPrefix method")
+
+	// ErrInvalidID reports text that is not a valid identifier, or one with a prefix other than
+	// the one expected. See [*InvalidIDError].
+	ErrInvalidID = errors.New("idora: invalid identifier")
 )
 
 // InvalidPrefixReason says which prefix rule an [InvalidPrefixError] broke. Its String form
@@ -95,8 +102,9 @@ func (e *InvalidPrefixError) detail() string {
 		return fmt.Sprintf("an entity prefix cannot be empty; supply 1 to %d ASCII letters or digits, "+
 			"for example \"usr\"", MaxPrefixLen)
 	case ReasonTooLong:
-		return fmt.Sprintf("the entity prefix %q is %d characters long; the maximum is %d, so shorten it",
-			e.Prefix, e.Length, MaxPrefixLen)
+		// The prefix may be untrusted input, from an identifier being parsed, of any length.
+		return fmt.Sprintf("the entity prefix %s is %d characters long; the maximum is %d, so shorten it",
+			quoteText(e.Prefix), e.Length, MaxPrefixLen)
 	case ReasonSeparator:
 		return fmt.Sprintf("the entity prefix %q contains the separator %q at index %d; the separator "+
 			"divides the prefix from the value, so a prefix cannot contain one", e.Prefix, e.Char, e.Index)
@@ -192,6 +200,150 @@ func (e *PromotedPrefixError) Error() string {
 
 // Is reports whether target is [ErrPromotedPrefix].
 func (e *PromotedPrefixError) Is(target error) bool { return target == ErrPromotedPrefix }
+
+// InvalidIDReason says which parsing rule an [InvalidIDError] broke. Its String form matches the
+// reason names in the Idora conformance vectors.
+type InvalidIDReason uint8
+
+const (
+	// ReasonNoSeparator means the text contains no [Separator], so it has no prefix and value
+	// to split into.
+	ReasonNoSeparator InvalidIDReason = iota + 1
+	// ReasonPrefix means the text before the first separator is not a valid prefix. The
+	// [InvalidIDError] carries the [*InvalidPrefixError] as its Cause.
+	ReasonPrefix
+	// ReasonValue means the text after the first separator is neither a ULID nor a UUIDv7.
+	ReasonValue
+	// ReasonPrefixMismatch means the identifier is valid, but its prefix is not exactly the one
+	// the caller asked for.
+	ReasonPrefixMismatch
+)
+
+// String returns "noSeparator", "prefix", "value" or "prefixMismatch".
+func (r InvalidIDReason) String() string {
+	switch r {
+	case ReasonNoSeparator:
+		return "noSeparator"
+	case ReasonPrefix:
+		return "prefix"
+	case ReasonValue:
+		return "value"
+	case ReasonPrefixMismatch:
+		return "prefixMismatch"
+	default:
+		return "InvalidIDReason(" + strconv.Itoa(int(r)) + ")"
+	}
+}
+
+// InvalidIDError reports text that [Parse] and its relatives rejected. It matches
+// [ErrInvalidID], and for [ReasonPrefix] also [ErrInvalidPrefix], because it unwraps to Cause.
+type InvalidIDError struct {
+	// Text is the rejected input, exactly as supplied.
+	Text string
+	// Reason is the first rule the text broke.
+	Reason InvalidIDReason
+	// ExpectedPrefix is the prefix the caller asked for, for ReasonPrefixMismatch, and ""
+	// otherwise.
+	ExpectedPrefix string
+	// Cause is the reason the prefix is invalid, for ReasonPrefix, and nil otherwise.
+	Cause *InvalidPrefixError
+}
+
+// Error describes the broken rule and how to fix it.
+func (e *InvalidIDError) Error() string {
+	text := quoteText(e.Text)
+	switch e.Reason {
+	case ReasonNoSeparator:
+		return fmt.Sprintf("idora: %s is not an identifier: it contains no separator %q; an identifier "+
+			"is a prefix, an underscore and a value, for example \"usr_01k2f9v8ta7m3x0qbrn4dzeh5c\"",
+			text, Separator)
+	case ReasonPrefix:
+		detail := "its prefix is invalid"
+		if e.Cause != nil {
+			detail = e.Cause.detail()
+		}
+		return fmt.Sprintf("idora: %s is not a valid identifier: %s", text, detail)
+	case ReasonPrefixMismatch:
+		prefix, _, _ := strings.Cut(e.Text, string(Separator))
+		return fmt.Sprintf("idora: %s has the prefix %q, but the prefix %s was expected; prefixes "+
+			"are compared exactly, case included, so the identifier belongs to a different entity type",
+			text, prefix, quoteText(e.ExpectedPrefix))
+	default:
+		_, value, _ := strings.Cut(e.Text, string(Separator))
+		return fmt.Sprintf("idora: %s is not a valid identifier: %s", text, valueProblem(value))
+	}
+}
+
+// Unwrap returns Cause, so errors.Is and errors.As see the [*InvalidPrefixError] behind
+// ReasonPrefix. It returns nil for the other reasons.
+func (e *InvalidIDError) Unwrap() error {
+	if e.Cause == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+// Is reports whether target is [ErrInvalidID].
+func (e *InvalidIDError) Is(target error) bool { return target == ErrInvalidID }
+
+// valueProblem explains why the text after the separator is not a value. It is only called
+// for text the parser rejected, and works out the reason again rather than making the parser
+// record it.
+func valueProblem(v string) string {
+	const formats = "a value is a 26-character lowercase ULID or a 32-character lowercase UUIDv7 " +
+		"without hyphens"
+	switch len(v) {
+	case 0:
+		return "it has nothing after the separator; " + formats
+	case ulidLen:
+		if i := strings.IndexFunc(v, func(r rune) bool { return r > 0x7f || crockfordValue[r] == 0xff }); i >= 0 {
+			return fmt.Sprintf("the value %q has a length of 26, so it must be a ULID, but contains %q "+
+				"at index %d, which is not in the lowercase Crockford Base32 alphabet "+
+				"(0-9 and a-z without i, l, o and u)", v, firstRune(v[i:]), i)
+		}
+		return fmt.Sprintf("the value %q has a length of 26, so it must be a ULID, but starts with %q; "+
+			"the first character of a ULID is at most '7', or it would not fit in 128 bits", v, v[0])
+	case uuidV7Len:
+		if i := strings.IndexFunc(v, func(r rune) bool { return r > 0x7f || hexValue[r] == 0xff }); i >= 0 {
+			return fmt.Sprintf("the value %q has a length of 32, so it must be a UUIDv7, but contains %q "+
+				"at index %d, which is not a lowercase hexadecimal digit", v, firstRune(v[i:]), i)
+		}
+		if v[12] != '7' {
+			return fmt.Sprintf("the value %q has a length of 32, so it must be a UUIDv7, but its version "+
+				"digit (index 12) is %q rather than '7'", v, v[12])
+		}
+		return fmt.Sprintf("the value %q has a length of 32, so it must be a UUIDv7, but its variant "+
+			"digit (index 16) is %q rather than one of '8', '9', 'a' or 'b'", v, v[16])
+	default:
+		hint := ""
+		if strings.ContainsRune(v, '-') {
+			hint = ", and hyphens are not accepted"
+		}
+		// Any length gets here, so the value is quoted shortened: it is untrusted input.
+		return fmt.Sprintf("the value %s has a length of %d; %s%s", quoteText(v), len(v), formats, hint)
+	}
+}
+
+func firstRune(s string) rune {
+	for _, r := range s {
+		return r
+	}
+	return 0
+}
+
+// quoteText quotes rejected input for a message, shortening it so that a megabyte of garbage
+// in a request does not become a megabyte of log line.
+func quoteText(s string) string {
+	const limit = 64
+	if len(s) <= limit {
+		return strconv.Quote(s)
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return strconv.Quote(s[:cut]) + "…"
+}
 
 func typeString(t reflect.Type) string {
 	if t == nil {

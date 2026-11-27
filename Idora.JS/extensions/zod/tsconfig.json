@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    // Zod's declarations refer to platform types such as URL, which the core's ES-only lib omits.
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

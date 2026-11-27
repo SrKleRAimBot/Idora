@@ -1,3 +1,4 @@
+import { type Id, IdoraId } from './idora-id.js';
 import { createUuidV7, UUID_LENGTH } from './internal/uuidv7.js';
 import { SEPARATOR, validatePrefix } from './internal/prefix.js';
 import { ULID_LENGTH, UlidStream } from './internal/ulid.js';
@@ -128,5 +129,96 @@ export class Idora {
   generateWithPrefix(prefix: string): string {
     validatePrefix(prefix, 'prefix');
     return prefix + SEPARATOR + this.#createValue();
+  }
+
+  /**
+   * Parses `text` as an identifier for a registered entity type: a well-formed identifier whose
+   * prefix is exactly the one `entityType` was registered with.
+   *
+   * ```ts
+   * const id = ids.parse(User, request.params.id);
+   * id.createdAt; // when the user was created
+   *
+   * ids.parse(User, 'ord_01k226e0g0008j4ct4ank7f24s'); // throws InvalidIdError, reason 'prefixMismatch'
+   * ```
+   *
+   * Either format parses, whichever strategy this generator uses, so a column can change format
+   * without its old identifiers becoming unreadable.
+   *
+   * @throws {EntityPrefixNotRegisteredError} `entityType` has no registered prefix. Checked before
+   * the text, because the mistake is in the calling code rather than in the identifier.
+   * @throws {InvalidIdError} `text` is not a well-formed identifier, or has another prefix.
+   * @throws {TypeError} `text` is not a string.
+   */
+  parse(entityType: EntityType, text: string): IdoraId {
+    return this.registry.parse(entityType, text);
+  }
+
+  /**
+   * Parses `text` as an identifier for a registered entity type, returning `undefined` instead of
+   * throwing if it is malformed, has another prefix, or is not a string at all.
+   *
+   * @throws {EntityPrefixNotRegisteredError} `entityType` has no registered prefix. That is a
+   * mistake in the calling code rather than in the text, so it throws even here.
+   */
+  tryParse(entityType: EntityType, text: unknown): IdoraId | undefined {
+    return this.registry.tryParse(entityType, text);
+  }
+
+  /**
+   * Whether `text` is a well-formed identifier for a registered entity type. In TypeScript this is
+   * a type guard, narrowing `text` to {@link Id}:
+   *
+   * ```ts
+   * app.get('/users/:id', (request, response) => {
+   *   if (!ids.isIdFor(User, request.params.id)) {
+   *     return response.status(404).end();
+   *   }
+   *   // ...
+   * });
+   * ```
+   *
+   * @throws {EntityPrefixNotRegisteredError} `entityType` has no registered prefix.
+   */
+  isIdFor(entityType: EntityType, text: unknown): text is Id {
+    return this.registry.isIdFor(entityType, text);
+  }
+
+  /**
+   * The lowest identifier this generator — or any other using the same strategy — can mint for
+   * `entityType` in the millisecond `time`. With {@link upperBound} it selects every identifier
+   * minted in a span of time as a plain string range, with no parsing and an index scan:
+   *
+   * ```ts
+   * // Every user created in the last day.
+   * const from = ids.lowerBound(User, Date.now() - 86_400_000).text;
+   * const to = ids.upperBound(User, Date.now()).text;
+   * // SELECT * FROM users WHERE id >= $1 AND id <= $2
+   * ```
+   *
+   * The bound is in this generator's {@link strategy}, which is right for a column it fills. For a
+   * column in the other format, use {@link IdoraId.lowerBound} and name the format.
+   *
+   * @param time A `Date`, or milliseconds since the Unix epoch. Any sub-millisecond part is dropped.
+   * @throws {EntityPrefixNotRegisteredError} `entityType` has no registered prefix.
+   * @throws {RangeError} `time` is before the Unix epoch, after the year 10889, or not a valid time.
+   * @throws {TypeError} `time` is neither a `Date` nor a number.
+   */
+  lowerBound(entityType: EntityType, time: Date | number): IdoraId {
+    return IdoraId.lowerBound(this.registry.getPrefix(entityType), time, this.strategy);
+  }
+
+  /**
+   * The highest identifier this generator — or any other using the same strategy — can mint for
+   * `entityType` in the millisecond `time`. See {@link lowerBound}; the range from one to the other
+   * is inclusive at both ends.
+   *
+   * @param time A `Date`, or milliseconds since the Unix epoch. Any sub-millisecond part is dropped.
+   * @throws {EntityPrefixNotRegisteredError} `entityType` has no registered prefix.
+   * @throws {RangeError} `time` is before the Unix epoch, after the year 10889, or not a valid time.
+   * @throws {TypeError} `time` is neither a `Date` nor a number.
+   */
+  upperBound(entityType: EntityType, time: Date | number): IdoraId {
+    return IdoraId.upperBound(this.registry.getPrefix(entityType), time, this.strategy);
   }
 }

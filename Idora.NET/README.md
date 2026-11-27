@@ -15,7 +15,9 @@ inv_01k2f9v8tc4h8w6zqm1vptb2j9
 
 A prefix you register once, an underscore, and a lowercase [ULID](https://github.com/ulid/spec) or
 [UUIDv7](https://www.rfc-editor.org/rfc/rfc9562). No magic strings at the call site, no
-configuration file, no dependencies beyond the DI abstractions.
+configuration file, no dependencies beyond the DI abstractions. When identifiers come back — in a
+route, a message, a foreign key — `IdoraId` parses, validates and orders them, whichever Idora
+package minted them.
 
 ---
 
@@ -47,11 +49,22 @@ in the order they were created, with no separate timestamp column and no seconda
 dotnet add package Idora.NET
 ```
 
-Targets `net8.0`, `net9.0` and `net10.0`. The only dependency is
+Targets `net8.0`, `net9.0`, `net10.0` and `net11.0`. The only dependency is
 `Microsoft.Extensions.DependencyInjection.Abstractions`, so that `AddIdora` can extend
 `IServiceCollection`; nothing else is pulled in.
 
 The package is `Idora.NET`; the namespace and assembly are plain `Idora`.
+
+Two companion packages, versioned and released with it, plug identifiers into the frameworks you
+are most likely to store and serve them with:
+
+| Package | Adds |
+| --- | --- |
+| [`Idora.NET.EntityFrameworkCore`](https://github.com/SrKleRAimBot/Idora/tree/main/Idora.NET/src/Idora.EntityFrameworkCore) | Keys generated on insert with the entity's prefix, `IdoraId` columns, and creation-time range queries that use the primary key's index |
+| [`Idora.NET.AspNetCore`](https://github.com/SrKleRAimBot/Idora/tree/main/Idora.NET/src/Idora.AspNetCore) | An `{id:idora(usr)}` route constraint and `[IdoraId]` / `[IdoraIdFor<User>]` validation attributes |
+
+Neither is needed to bind an `IdoraId` in ASP.NET Core or to serialise one as JSON; the core package
+does both on its own. See [Reading identifiers back](#reading-identifiers-back).
 
 ---
 
@@ -273,18 +286,184 @@ string id = ids.Generate<User>();
 ### Reading prefixes back
 
 `IEntityPrefixRegistry` is registered alongside the generator, for when you need the prefix itself
-rather than a whole identifier — checking that an identifier belongs to the entity a route expects,
-for instance:
+rather than a whole identifier — building a filter over stored identifiers, for instance:
 
 ```csharp
-public sealed class OrderEndpoint(IEntityPrefixRegistry prefixes)
-{
-    public bool IsAnOrderId(string id) => id.StartsWith(prefixes.GetPrefix<Order>() + "_");
-}
+string orderPrefix = prefixes.GetPrefix<Order>();   // "ord"
 ```
 
 It also offers `TryGetPrefix<TEntity>(out string?)` and a `Registrations` dictionary of everything
-that was registered.
+that was registered. To check that an identifier belongs to a particular entity, don't compare
+prefixes by hand — use `prefixes.IsIdFor<Order>(id)`, which also checks that the rest of it is well
+formed. See [Checking it is the right entity's](#checking-it-is-the-right-entitys).
+
+---
+
+## Reading identifiers back
+
+Generation is half of the job. Identifiers come back — in a route, a message body, a foreign key
+from another service — and `IdoraId` is the type that checks them, reads them and puts them in
+order, so nobody re-implements the format with `Split('_')`.
+
+```csharp
+IdoraId id = IdoraId.Parse("usr_01k226e0g0008j4ct4ank7f24s");
+
+id.Prefix;                  // "usr"
+id.Value;                   // "01k226e0g0008j4ct4ank7f24s"
+id.Format;                  // IdGenerationStrategy.Ulid
+id.Timestamp;               // 2025-08-07T12:00:00.000+00:00
+id.TimestampMilliseconds;   // 1754568000000
+id.ToString();              // "usr_01k226e0g0008j4ct4ank7f24s", the very string that was parsed
+```
+
+It reads any conforming identifier — ULID or UUIDv7, whichever strategy your own generator uses,
+minted by this package or by Idora for JavaScript, Java, Go or Rust. The timestamp comes out of the
+identifier itself, so it is the same on every machine, in UTC, whatever the reader's clock or time
+zone.
+
+`IdoraId` is a small readonly struct that wraps the original string. **Parsing a string allocates
+nothing**, and `ToString()` and the implicit conversion to `string` hand back the very same
+instance, so an `IdoraId` can go anywhere a string identifier went before.
+
+### Parsing
+
+| Method | On bad input |
+| --- | --- |
+| `IdoraId.Parse(text)` | throws `InvalidIdException` |
+| `IdoraId.TryParse(text, out IdoraId id)` | returns `false` |
+| `IdoraId.IsValid(text)` | returns `false`, and allocates nothing |
+
+Each takes an optional expected prefix — `IdoraId.Parse(text, "usr")` — and has an overload for
+`ReadOnlySpan<char>`. `IdoraId` also implements `IParsable<T>` and `ISpanParsable<T>`, so generic
+parsing code and framework binding find it without help.
+
+Parsing is **strict**. It accepts exactly what a generator emits and nothing else: no trimming, no
+case folding, no hyphens. That is deliberate. An identifier is a key, and a lenient parser that
+accepted `USR_01K226…` or a value with a trailing space would hand you a value that matches nothing
+in the database — or, worse, matches when it shouldn't. The rules, in the order they are checked:
+
+| `InvalidIdReason` | The text… |
+| --- | --- |
+| `NoSeparator` | contains no `_` at all — often a bare ULID or UUID that has lost its prefix |
+| `Prefix` | has a part before the first `_` that is not a valid prefix (the `InvalidEntityPrefixException` explaining why is the `InnerException`) |
+| `Value` | has a part after it that is neither a 26-character lowercase ULID nor a 32-character lowercase UUIDv7 |
+| `PrefixMismatch` | is well formed, but its prefix is not exactly the one you asked for, case included |
+
+The exception carries the `Text`, the `Reason` and the `ExpectedPrefix`, and the message says
+precisely what is wrong — *"it has the uppercase character 'K' at index 2"*, *"it is 25 characters
+long, but a ULID is 26 characters and a UUIDv7 32"* — and what to do about it. A malformed
+identifier is reported as malformed even if you also asked for a prefix: the mismatch is only
+reported for an identifier that is otherwise valid.
+
+### Checking it is the right entity's
+
+The expected prefix is where most of the value is: an identifier that parses but belongs to the
+wrong kind of entity is the bug a prefix exists to catch. Rather than repeat the prefix as a string,
+ask the registry:
+
+```csharp
+public sealed class OrdersEndpoint(IEntityPrefixRegistry prefixes)
+{
+    public IResult Get(string id) =>
+        prefixes.TryParseIdFor<Order>(id, out IdoraId orderId)
+            ? Results.Ok(Load(orderId))
+            : Results.NotFound();
+}
+```
+
+`IsIdFor<TEntity>`, `ParseIdFor<TEntity>` and `TryParseIdFor<TEntity>` each have a `Type` overload
+too. For a type with no registered prefix they throw `EntityPrefixNotRegisteredException` — even the
+`Try` and `Is` forms — because then it is the configuration that is wrong, not the identifier.
+
+`ids.GenerateId<User>()` is the other direction: a new identifier, as an `IdoraId`.
+
+### Ordering
+
+Two identifiers are equal when their text is ordinally equal. Their **natural order** is
+chronological — by timestamp, then by value, then by prefix — and every comparison operator,
+`CompareTo`, `List<IdoraId>.Sort()` and LINQ's `OrderBy` use it:
+
+```csharp
+IdoraId user  = ids.GenerateId<User>();    // usr_…
+IdoraId order = ids.GenerateId<Order>();   // ord_…, a moment later
+
+order > user;               // true: created later, even though "ord" < "usr" as text
+order.IsAfter(user);        // the same thing, as a method
+```
+
+Ordering by timestamp first, rather than as plain text, is what lets identifiers of different
+entity types and different formats interleave in the order they were made. Within one format the
+value agrees with the timestamp, so ULIDs generated on one thread sort in exactly the order they
+were generated.
+
+For questions about time rather than order:
+
+| Member | Answers |
+| --- | --- |
+| `a.CompareTimestamp(b)` | which was minted in the earlier millisecond, with `0` for the same one |
+| `a.IsSameMillisecond(b)` | whether they were minted in the same millisecond |
+| `id.IsCreatedBefore(instant)` | whether it was minted strictly before an instant, at millisecond precision |
+| `id.IsCreatedAfter(instant)` | whether it was minted strictly after one |
+| `id.HasPrefix("usr")` | whether the prefix is exactly `usr`, case included, without allocating |
+
+### Querying by creation time
+
+Because a value starts with its timestamp, every identifier minted for one prefix over a span of
+time falls in one contiguous range of strings. `IdoraId.LowerBound` and `IdoraId.UpperBound` give
+you its ends:
+
+```csharp
+DateTimeOffset day = new(2025, 8, 7, 0, 0, 0, TimeSpan.Zero);
+
+string from = IdoraId.LowerBound("ord", day);                           // ord_01k20x7n000000000000000000
+string to   = IdoraId.UpperBound("ord", day.AddDays(1).AddTicks(-1));   // ord_01k23fmbzzzzzzzzzzzzzzzzzz
+
+// WHERE Id >= @from AND Id <= @to — answered from the primary key's index.
+```
+
+That selects every order created that day with two plain string comparisons — no `CreatedAt`
+column, no secondary index, and no row parsed. The bounds are inclusive, cover the whole of each
+end's millisecond, and are themselves valid identifiers. They compare correctly against identifiers
+of the **same prefix and format**, which is exactly what a key column holds. The
+[Entity Framework Core package](https://github.com/SrKleRAimBot/Idora/tree/main/Idora.NET/src/Idora.EntityFrameworkCore)
+wraps this as `WhereCreatedBetween(order => order.Id, "ord", from, to)`.
+
+The database compares them with the column's collation, so give the column a binary or `C`
+collation. A linguistic collation is safe only if it orders the identifier's characters exactly as
+a byte comparison does, and many do not: Czech and Slovak treat `ch` as one letter, Danish `aa`,
+Lithuanian sorts `y` before `j`, Estonian `z` before `t`, and a numeric ("natural sort")
+collation compares runs of digits as numbers. Any of them can put a bound on the wrong side of a
+row, so the range silently misses it. See
+[§6.4 of the specification](https://github.com/SrKleRAimBot/Idora/blob/main/spec/SPECIFICATION.md#64-range-bounds).
+
+`IdoraId.GetLength("usr", IdGenerationStrategy.Ulid)` is the exact length of every such identifier
+(30), and `IdoraId.GetMaxLength(...)` the longest any prefix can produce (43 for ULIDs, 49 for
+UUIDv7s) — the numbers to size a column with.
+
+### JSON, binding and configuration
+
+`IdoraId` carries a `System.Text.Json` converter and a `TypeConverter`, both in the box, so with no
+setup at all it:
+
+- serialises as a plain JSON string, `"usr_01k226e0g0008j4ct4ank7f24s"`, and as a dictionary key —
+  with the reflection serializer and with source-generated `JsonSerializerContext`s alike;
+- fails deserialisation of a malformed identifier with a `JsonException` that carries the
+  `InvalidIdException` and the JSON path;
+- binds from routes, query strings and headers in **minimal APIs** (through `IParsable<T>`) and
+  **MVC** (through `IParsable<T>` and the `TypeConverter`), answering malformed input with a 400;
+- binds from **configuration**: `configuration.Get<Settings>()` fills `IdoraId` properties.
+
+```csharp
+app.MapGet("/users/{id}", (IdoraId id) => ...);   // /users/nope is a 400, not a 500
+```
+
+### The empty identifier
+
+`default(IdoraId)` — what an unassigned field holds — is the *empty* identifier, and never the
+result of a successful parse. `IsEmpty` is `true`; `Prefix`, `Value` and `ToString()` are empty
+strings; the timestamp is the Unix epoch and the format `Ulid`. It equals only itself and sorts
+before every real identifier. In JSON it is written as `null`, and `null` reads back as it; use
+`IdoraId?` where "absent" and "empty" need telling apart.
 
 ---
 
@@ -334,9 +513,11 @@ not care which went wrong.
 | --- | --- | --- | --- |
 | `InvalidEntityPrefixException` | A prefix is empty, longer than 16 characters, or contains something other than an ASCII letter or digit | Start-up, or on the `Generate(string)` call | Use 1–16 letters and digits, no underscore |
 | `DuplicateEntityPrefixException` | The same prefix is registered for two entity types, or one entity type is registered twice — whether by two `RegisterEntity` calls, one of each style, or the same assembly being scanned twice | Start-up | Give each entity type its own prefix, and register it exactly once |
-| `EntityPrefixNotRegisteredException` | `Generate<TEntity>()` is called for a type with no registered prefix | On the call | Register the type, or use `Generate(string)` |
+| `EntityPrefixNotRegisteredException` | `Generate<TEntity>()`, or a registry lookup such as `IsIdFor<TEntity>`, is called for a type with no registered prefix | On the call | Register the type, or use `Generate(string)` |
+| `InvalidIdException` | Text that should be an identifier is not one, or has another entity's prefix; `Reason` says which rule failed | On the `Parse` call | Usually bad input — answer it with a 400, or use `TryParse` |
 
-The first two are start-up failures by design. A duplicate prefix defeats the whole point — you
+The first two are start-up failures by design; `InvalidIdException` is the opposite, a report about
+input that is expected to be wrong now and then. A duplicate prefix defeats the whole point — you
 could no longer tell from `acc_01k2f9…` whether you were looking at an `Account` or an `Accrual` —
 so the process refuses to start rather than let it through. Prefixes are compared **ignoring case**,
 so `usr` and `USR` count as a collision.
@@ -398,6 +579,23 @@ Three things get it there:
   `Generate<User>()` to `"usr_"` is a couple of nanoseconds. Prefixes declared with
   `[EntityPrefix]` land in the same dictionary — the assembly scan happens during start-up and
   the numbers above are unchanged by it.
+
+### Parsing and comparing
+
+Parsing is as cheap, and allocates **nothing**: an `IdoraId` wraps the string it was parsed from.
+Same machine and settings, against `Guid.TryParse` as the baseline:
+
+| Method | Mean | Ratio | Allocated |
+| --- | ---: | ---: | ---: |
+| `Guid.TryParse` *(baseline)* | 9.7 ns | 1.00 | - |
+| **`IdoraId.Parse` — ULID** | **17.2 ns** | **1.77** | **-** |
+| **`IdoraId.Parse` — UUIDv7** | **24.6 ns** | **2.53** | **-** |
+| **`IdoraId.IsValid(text, prefix)`** | **17.1 ns** | **1.76** | **-** |
+| **`IdoraId.CompareTo`** | **3.1 ns** | **0.32** | **-** |
+
+That is a full check of the prefix and every character of the value, plus decoding the timestamp, in
+under twenty nanoseconds — cheap enough to run on every request in a route constraint. Reproduce
+with `dotnet run -c Release --project tests/Idora.Benchmarks -- --filter '*IdParsingBenchmarks*'`.
 
 **Thread safety.** The generator is immutable and registered as a singleton; call it from as many
 threads as you like. There are no locks anywhere — the monotonic counter and the entropy buffer are
@@ -480,22 +678,21 @@ logs, URLs and support tickets. **Treat them as public.** Authorise every reques
 use an identifier as a bearer token or a password-reset secret.
 
 **How do I split an identifier back apart?**
-Split on the first underscore. The prefix contains no underscores, by rule, so this is unambiguous:
-
-```csharp
-int separator = id.IndexOf('_');
-string prefix = id[..separator];    // "usr"
-string value  = id[(separator + 1)..];  // "01k2f9v8ta7m3x0qbrn4dzeh5c"
-```
+Parse it: `IdoraId.Parse(id)` gives you `Prefix`, `Value`, `Format` and `Timestamp`, and checks the
+identifier is well formed while it is at it. See [Reading identifiers back](#reading-identifiers-back).
+The format is simple enough to split on the first underscore by hand — the prefix cannot contain
+one — but then nothing tells you the rest was valid.
 
 **Can I use these as Entity Framework Core keys?**
-Yes — they are ordinary strings. Assign one in your constructor or in a `SaveChanges` interceptor
-rather than letting the database generate the key. Because the values are time-ordered, clustered
-index inserts stay at the end of the index, which is exactly the behaviour you want and the reason
-not to use `Guid.NewGuid()`.
+Yes. Add [`Idora.NET.EntityFrameworkCore`](https://github.com/SrKleRAimBot/Idora/tree/main/Idora.NET/src/Idora.EntityFrameworkCore)
+and write `modelBuilder.Entity<User>().HasIdoraKey(user => user.Id)`: EF Core fills the key in on
+insert with the entity's registered prefix, in a correctly sized ASCII column, and `IdoraId`-typed
+keys work too. Without it they are still ordinary strings you can assign yourself. Either way the
+values are time-ordered, so clustered index inserts stay at the end of the index, which is exactly
+the behaviour you want and the reason not to use `Guid.NewGuid()`.
 
 **Are identifiers case-sensitive?**
-Yes, compare them with `StringComparer.Ordinal`. Generated values are always lowercase, and neither
+Yes; `IdoraId` compares them ordinally, and as strings compare them with `StringComparer.Ordinal`. Generated values are always lowercase, and neither
 alphabet contains two characters that differ only by case, so the value half is effectively
 case-insensitive anyway. Your prefix is emitted exactly as you registered it, so registering `USR`
 gives you `USR_01k2f9…`.
@@ -526,7 +723,7 @@ you need a different prefix, change the attribute.
 
 ## Migrating from UserFriendlyIds
 
-`Idora.NET` 1.0.0 is `UserFriendlyIds` 1.1.0 under its new name. Identifiers are byte-for-byte
+`Idora.NET` 1.0.0 is `UserFriendlyIds` 1.1.0 under its new name; everything since is additive. Identifiers are byte-for-byte
 the same format, so everything you have already stored stays valid, and the rename is mechanical:
 
 | UserFriendlyIds | Idora.NET |
@@ -555,7 +752,9 @@ dotnet run   -c Release --project tests/Idora.Benchmarks -- --filter '*'
 ```
 
 Tests are written Arrange-Act-Assert and cover the success, failure and edge cases of every public
-member, plus the encoders, the monotonic counter and the allocation behaviour directly.
+member, plus the encoders, the monotonic counter and the allocation behaviour directly. The
+Entity Framework Core package is tested against a real SQLite database, and the ASP.NET Core
+package against an in-memory test server.
 `ConformanceTests` runs the shared cross-language vectors in
 [`spec/test-vectors.json`](https://github.com/SrKleRAimBot/Idora/blob/main/spec/test-vectors.json),
 which every Idora package must reproduce exactly; the behaviour they pin down is set out in the
@@ -563,13 +762,15 @@ which every Idora package must reproduce exactly; the behaviour they pin down is
 
 ## Releasing
 
-Releases are driven by tags. Each Idora package is versioned and released on its own, so the tag
-names the package: pushing an `Idora.NET/v*` tag builds all three target frameworks, runs the full
-suite, packs, verifies the package contents, publishes to nuget.org and opens a GitHub release:
+Releases are driven by tags. Each Idora language is versioned and released on its own, so the tag
+names it: pushing an `Idora.NET/v*` tag builds all three target frameworks, runs the full suite,
+packs **every** .NET package — `Idora.NET`, `Idora.NET.EntityFrameworkCore` and
+`Idora.NET.AspNetCore`, all at the tag's version — verifies each package's contents, publishes them
+to nuget.org and opens a GitHub release:
 
 ```bash
-git tag Idora.NET/v1.0.0
-git push origin Idora.NET/v1.0.0
+git tag Idora.NET/v1.1.0
+git push origin Idora.NET/v1.1.0
 ```
 
 The published version comes from the tag, not from the `csproj`, so the two can never disagree. A
@@ -578,13 +779,14 @@ matters, because **a version published to nuget.org can never be replaced**, onl
 
 To rehearse a release without publishing anything, run the `Release Idora.NET` workflow manually
 from the Actions tab. A manual run builds, tests, packs and verifies exactly as a tag push does, and
-attaches the resulting package to the run as an artifact, but the publishing steps are gated on a
+attaches the resulting packages to the run as an artifact, but the publishing steps are gated on a
 tag push and are skipped. Publishing is deliberately unreachable from a branch or a hand-typed
 version.
 
 Publishing uses [Trusted Publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing):
 the workflow exchanges a short-lived GitHub OIDC token for a one-hour nuget.org API key, so there is
-no long-lived secret to store or rotate.
+no long-lived secret to store or rotate. The nuget.org trusted-publishing policy must cover every
+package ID the workflow pushes.
 
 ## License
 

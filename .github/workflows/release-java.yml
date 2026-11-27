@@ -1,8 +1,9 @@
 name: Release Idora.Java
 
-# Publishing is driven entirely by tags: `git tag Idora.Java/v1.0.0 && git push origin Idora.Java/v1.0.0`.
-# The version comes from the tag rather than the POM, so the published artifact and the tag can
-# never disagree.
+# Publishing is driven entirely by tags: `git tag Idora.Java/v1.1.0 && git push origin Idora.Java/v1.1.0`.
+# One tag publishes every published module together, at one version: idora, idora-jackson,
+# idora-hibernate and idora-spring-boot (never the parent or the benchmarks). The version comes from
+# the tag rather than the POMs, so the published artifacts and the tag can never disagree.
 on:
   push:
     tags: ['Idora.Java/v*']
@@ -44,15 +45,22 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          # Passed as data, never interpolated into the script: a hand-typed dry-run version is
+          # validated below, and must not be able to run as shell before it is.
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
+            VERSION="$INPUT_VERSION"
           else
             VERSION="${GITHUB_REF_NAME#Idora.Java/v}"
           fi
 
           # Maven Central versions are irreversible once published, so be strict.
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+          # Matched against the whole value, not line by line as grep would: a value with a newline in it
+          # must not pass on the strength of its first line.
+          SEMVER='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+          if ! [[ "$VERSION" =~ $SEMVER ]]; then
             echo "::error::'$VERSION' is not a valid semantic version (expected e.g. 1.0.0 or 1.0.0-rc.1)"
             exit 1
           fi
@@ -60,23 +68,26 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Stamp the version from the tag
+        # Sets the parent's version, which every module inherits, and the integrations' references
+        # to the core.
         run: mvn -B versions:set -DnewVersion="${{ steps.version.outputs.version }}" -DgenerateBackupPoms=false
 
       - name: Build and test
-        # The artifact is never published unless the whole suite passes on the exact build that is
-        # about to be deployed.
+        # Nothing is published unless every module's suite passes on the exact build that is about
+        # to be deployed.
         run: mvn -B verify
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: idora-java-${{ steps.version.outputs.version }}
-          path: Idora.Java/idora/target/*.jar
+          path: Idora.Java/idora*/target/*.jar
 
       - name: Sign and publish to Maven Central
         # The irreversible step. Reachable only from an Idora.Java/v* tag push. The release profile
         # signs with the in-process BouncyCastle signer, so no gpg binary or keyring is involved,
-        # and publishes through the Central Portal with automatic release.
+        # and publishes every published module as one Central Portal deployment with automatic
+        # release, so the core and its integrations appear together or not at all.
         if: github.event_name == 'push'
         run: mvn -B -P release -DskipTests deploy
         env:
@@ -91,4 +102,4 @@ jobs:
         with:
           name: Idora.Java v${{ steps.version.outputs.version }}
           generate_release_notes: true
-          files: Idora.Java/idora/target/*.jar
+          files: Idora.Java/idora*/target/*.jar

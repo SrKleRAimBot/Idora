@@ -1,13 +1,14 @@
-//! The value half of an identifier: ULID (specification §3.1) and UUIDv7 (§3.2).
+//! The value half of an identifier: ULID (specification §3.1) and UUIDv7 (§3.2), written and read.
 //!
 //! Everything here except [`write_ulid`] and [`write_uuid_v7`] is a pure function of its inputs,
-//! so the encodings and the monotonic step can be checked against the shared conformance vectors
-//! with known clocks and known randomness.
+//! so the encodings, the monotonic step and the strict recognisers can be checked against the
+//! shared conformance vectors with known clocks and known randomness.
 
 #![forbid(unsafe_code)]
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::strategy::Strategy;
 use crate::thread_state;
 
 /// Number of characters in an encoded ULID.
@@ -21,10 +22,36 @@ const CROCKFORD: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
 
 const HEX: &[u8; 16] = b"0123456789abcdef";
 
+/// Marks a byte that is not a digit of the alphabet in [`CROCKFORD_DIGITS`] and [`HEX_DIGITS`].
+const NOT_A_DIGIT: u8 = 0xFF;
+
+/// Each byte's value as a lowercase Crockford Base32 digit, or [`NOT_A_DIGIT`]. Uppercase letters
+/// and the excluded `i l o u` are not digits: parsing is strict (§6.1).
+const CROCKFORD_DIGITS: [u8; 256] = digit_table(CROCKFORD);
+
+/// Each byte's value as a lowercase hexadecimal digit, or [`NOT_A_DIGIT`].
+const HEX_DIGITS: [u8; 256] = digit_table(HEX);
+
+const fn digit_table(alphabet: &[u8]) -> [u8; 256] {
+    let mut table = [NOT_A_DIGIT; 256];
+    let mut digit = 0;
+    while digit < alphabet.len() {
+        #[allow(clippy::cast_possible_truncation)] // at most 31
+        {
+            table[alphabet[digit] as usize] = digit as u8;
+        }
+        digit += 1;
+    }
+    table
+}
+
 /// The largest value the 80-bit ULID random field can hold.
 pub(crate) const MAX_RANDOM: u128 = (1 << 80) - 1;
 
-const TIMESTAMP_MASK: u64 = (1 << 48) - 1;
+/// The largest timestamp either format can hold: 48 bits of milliseconds, early in the year 10889.
+pub(crate) const MAX_TIMESTAMP_MS: u64 = (1 << 48) - 1;
+
+const TIMESTAMP_MASK: u64 = MAX_TIMESTAMP_MS;
 
 /// Reads the wall clock as milliseconds since the Unix epoch.
 ///
@@ -126,6 +153,89 @@ pub(crate) fn encode_hex(bytes: [u8; 16]) -> [u8; UUID_LEN] {
         pair[1] = HEX[usize::from(byte & 0x0F)];
     }
     out
+}
+
+/// Recognises a value exactly as a conforming generator writes it (§6.1 rule 4) and returns the
+/// millisecond timestamp it begins with, or `None`. The length decides the format: 26 characters
+/// must be a ULID, 32 a UUIDv7, and nothing else is either.
+#[inline]
+#[must_use]
+pub(crate) fn read_value(value: &[u8]) -> Option<(Strategy, u64)> {
+    match value.len() {
+        ULID_LEN => read_ulid(value).map(|ms| (Strategy::Ulid, ms)),
+        UUID_LEN => read_uuid_v7(value).map(|ms| (Strategy::UuidV7, ms)),
+        _ => None,
+    }
+}
+
+/// A 26-character lowercase Crockford Base32 ULID whose first character is at most `7`.
+fn read_ulid(value: &[u8]) -> Option<u64> {
+    if value[0] > b'7' {
+        return None;
+    }
+    let mut timestamp = 0u64;
+    for (i, &byte) in value.iter().enumerate() {
+        let digit = CROCKFORD_DIGITS[usize::from(byte)];
+        if digit == NOT_A_DIGIT {
+            return None;
+        }
+        if i < 10 {
+            timestamp = (timestamp << 5) | u64::from(digit);
+        }
+    }
+    // Ten characters are 50 bits; a first character of at most 7 leaves the top two clear.
+    Some(timestamp)
+}
+
+/// 32 lowercase hexadecimal characters with the version nibble `7` at index 12 and the RFC 9562
+/// variant (`8`, `9`, `a` or `b`) at index 16.
+fn read_uuid_v7(value: &[u8]) -> Option<u64> {
+    if value[12] != b'7' || !matches!(value[16], b'8' | b'9' | b'a' | b'b') {
+        return None;
+    }
+    let mut timestamp = 0u64;
+    for (i, &byte) in value.iter().enumerate() {
+        let digit = HEX_DIGITS[usize::from(byte)];
+        if digit == NOT_A_DIGIT {
+            return None;
+        }
+        if i < 12 {
+            timestamp = (timestamp << 4) | u64::from(digit);
+        }
+    }
+    Some(timestamp)
+}
+
+/// The lowest value any conforming generator can produce in millisecond `timestamp_ms` (§6.4):
+/// the timestamp followed by the smallest random field, or for UUIDv7 by `7000` `8000` and zeros.
+/// The timestamp must already be within 48 bits.
+pub(crate) fn lowest_value(timestamp_ms: u64, strategy: Strategy, dest: &mut [u8]) -> usize {
+    match strategy {
+        Strategy::Ulid => {
+            dest[..ULID_LEN].copy_from_slice(&encode_ulid(timestamp_ms, 0));
+            ULID_LEN
+        }
+        Strategy::UuidV7 => {
+            dest[..UUID_LEN].copy_from_slice(&encode_hex(compose_uuid_v7(timestamp_ms, [0; 10])));
+            UUID_LEN
+        }
+    }
+}
+
+/// The highest value any conforming generator can produce in millisecond `timestamp_ms` (§6.4):
+/// the timestamp followed by sixteen `z`, or for UUIDv7 by `7fff` `bfff` and twelve `f`.
+pub(crate) fn highest_value(timestamp_ms: u64, strategy: Strategy, dest: &mut [u8]) -> usize {
+    match strategy {
+        Strategy::Ulid => {
+            dest[..ULID_LEN].copy_from_slice(&encode_ulid(timestamp_ms, MAX_RANDOM));
+            ULID_LEN
+        }
+        Strategy::UuidV7 => {
+            dest[..UUID_LEN]
+                .copy_from_slice(&encode_hex(compose_uuid_v7(timestamp_ms, [0xFF; 10])));
+            UUID_LEN
+        }
+    }
 }
 
 /// Writes the next ULID from this thread's monotonic stream.
@@ -346,6 +456,77 @@ mod tests {
             s(&encode_hex([0xab; 16])),
             "abababababababababababababababab"
         );
+    }
+
+    #[test]
+    fn read_value_recovers_the_timestamp_of_everything_encoded() {
+        for ts in [0, 1, 31, 32, 1_754_568_000_000, MAX_TIMESTAMP_MS] {
+            let base32 = encode_ulid(ts, 0x0011_2233_4455_6677_8899);
+            assert_eq!(read_value(&base32), Some((Strategy::Ulid, ts)));
+            let hex = encode_hex(compose_uuid_v7(ts, [0xA5; 10]));
+            assert_eq!(read_value(&hex), Some((Strategy::UuidV7, ts)));
+        }
+    }
+
+    #[test]
+    fn read_value_rejects_every_byte_outside_the_alphabet_at_every_position() {
+        let base32 = encode_ulid(1_754_568_000_000, 0x0011_2233_4455_6677_8899);
+        let hex = encode_hex(compose_uuid_v7(1_754_568_000_000, [0x11; 10]));
+        for byte in 0..=u8::MAX {
+            let in_crockford = CROCKFORD.contains(&byte);
+            let in_hex = HEX.contains(&byte);
+            for i in 0..ULID_LEN {
+                let mut v = base32;
+                v[i] = byte;
+                let expected = in_crockford && (i != 0 || byte <= b'7');
+                assert_eq!(read_value(&v).is_some(), expected, "ulid {i} {byte}");
+            }
+            for i in 0..UUID_LEN {
+                let mut v = hex;
+                v[i] = byte;
+                let expected = match i {
+                    12 => byte == b'7',
+                    16 => matches!(byte, b'8' | b'9' | b'a' | b'b'),
+                    _ => in_hex,
+                };
+                assert_eq!(read_value(&v).is_some(), expected, "uuid {i} {byte}");
+            }
+        }
+    }
+
+    #[test]
+    fn read_value_decides_the_format_by_length_alone() {
+        for len in 0..64 {
+            let zeros = vec![b'0'; len];
+            let expected = (len == ULID_LEN).then_some((Strategy::Ulid, 0));
+            assert_eq!(read_value(&zeros), expected, "{len}");
+        }
+    }
+
+    #[test]
+    fn bounds_bracket_every_value_of_their_millisecond() {
+        for strategy in [Strategy::Ulid, Strategy::UuidV7] {
+            let (mut low, mut high) = ([0u8; UUID_LEN], [0u8; UUID_LEN]);
+            let len = lowest_value(1_000, strategy, &mut low);
+            assert_eq!(highest_value(1_000, strategy, &mut high), len);
+            assert_eq!(read_value(&low[..len]), Some((strategy, 1_000)));
+            assert_eq!(read_value(&high[..len]), Some((strategy, 1_000)));
+            for random in [[0u8; 10], [0x5A; 10], [0xFF; 10]] {
+                let value: Vec<u8> = match strategy {
+                    Strategy::Ulid => encode_ulid(
+                        1_000,
+                        u128::from_be_bytes({
+                            let mut wide = [0u8; 16];
+                            wide[6..].copy_from_slice(&random);
+                            wide
+                        }),
+                    )
+                    .to_vec(),
+                    Strategy::UuidV7 => encode_hex(compose_uuid_v7(1_000, random)).to_vec(),
+                };
+                assert!(low[..len] <= value[..] && value[..] <= high[..len]);
+            }
+        }
     }
 
     #[test]

@@ -2,6 +2,7 @@ package io.github.srkleraimbot.idora;
 
 import io.github.srkleraimbot.idora.internal.PackageScanner;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -11,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Generates prefixed, time-ordered identifiers such as {@code usr_01k2f9v8ta7m3x0qbrn4dzeh5c}.
@@ -87,6 +89,156 @@ public interface IdoraGenerator {
      * @return the strategy; never {@code null}
      */
     IdGenerationStrategy strategy();
+
+    /**
+     * Generates an identifier for a registered entity type, already parsed. Equivalent to
+     * {@code IdoraId.parse(generate(entityType))}, for code that holds {@link IdoraId} values
+     * rather than strings.
+     *
+     * @param entityType the entity type; it must have been registered while building the generator
+     * @return a new identifier
+     * @throws NullPointerException if {@code entityType} is {@code null}
+     * @throws EntityPrefixNotRegisteredException if {@code entityType} has no registered prefix
+     */
+    default IdoraId generateId(Class<?> entityType) {
+        return IdoraId.ofGenerated(generate(entityType));
+    }
+
+    /**
+     * Generates an identifier with a prefix supplied at the call site, already parsed. Equivalent
+     * to {@code IdoraId.parse(generate(entityPrefix))}.
+     *
+     * @param entityPrefix 1 to 16 ASCII letters or digits, without the trailing underscore
+     * @return a new identifier beginning with {@code entityPrefix} and an underscore
+     * @throws NullPointerException if {@code entityPrefix} is {@code null}
+     * @throws InvalidEntityPrefixException if {@code entityPrefix} breaks the rules
+     */
+    default IdoraId generateId(String entityPrefix) {
+        return IdoraId.ofGenerated(generate(entityPrefix));
+    }
+
+    /**
+     * Parses an identifier that must belong to a registered entity type: it must be well formed,
+     * and carry exactly the prefix {@code entityType} was registered with.
+     *
+     * <pre>{@code
+     * @GetMapping("/orders/{id}")
+     * Order get(@PathVariable String id) {
+     *     IdoraId orderId = ids.parseId(Order.class, id);   // "usr_..." or "nonsense" throw
+     *     ...
+     * }
+     * }</pre>
+     *
+     * <p>The value may be in either format, whatever this generator's {@link #strategy()}: an
+     * identifier minted before a change of strategy still parses.
+     *
+     * @param entityType the entity type the identifier must belong to
+     * @param text the identifier
+     * @return the parsed identifier
+     * @throws NullPointerException if {@code entityType} or {@code text} is {@code null}
+     * @throws EntityPrefixNotRegisteredException if {@code entityType} has no registered prefix;
+     *     the identifier is not at fault, so this is not an {@link InvalidIdException}
+     * @throws InvalidIdException if {@code text} is not a conforming identifier, or carries a
+     *     different prefix
+     */
+    default IdoraId parseId(Class<?> entityType, CharSequence text) {
+        return IdoraId.parse(text, registry().getPrefix(entityType));
+    }
+
+    /**
+     * Parses an identifier that must belong to a registered entity type, without throwing when it
+     * is malformed or carries a different prefix.
+     *
+     * @param entityType the entity type the identifier must belong to
+     * @param text the identifier
+     * @return the parsed identifier, or empty if {@code text} is not an identifier for
+     *     {@code entityType}
+     * @throws NullPointerException if {@code entityType} or {@code text} is {@code null}
+     * @throws EntityPrefixNotRegisteredException if {@code entityType} has no registered prefix
+     */
+    default Optional<IdoraId> tryParseId(Class<?> entityType, CharSequence text) {
+        return IdoraId.tryParse(text, registry().getPrefix(entityType));
+    }
+
+    /**
+     * Tells whether a text is a well-formed identifier carrying exactly the prefix
+     * {@code entityType} was registered with.
+     *
+     * <pre>{@code
+     * ids.isIdFor(User.class, "usr_01k2f9v8ta7m3x0qbrn4dzeh5c");   // true
+     * ids.isIdFor(User.class, "ord_01k2f9v8ta7m3x0qbrn4dzeh5c");   // false
+     * }</pre>
+     *
+     * @param entityType the entity type
+     * @param text the text to check
+     * @return {@code true} if {@link #parseId(Class, CharSequence)} would accept it
+     * @throws NullPointerException if {@code entityType} or {@code text} is {@code null}
+     * @throws EntityPrefixNotRegisteredException if {@code entityType} has no registered prefix
+     */
+    default boolean isIdFor(Class<?> entityType, CharSequence text) {
+        return IdoraId.isValid(text, registry().getPrefix(entityType));
+    }
+
+    /**
+     * Returns the lowest identifier this generator's strategy can mint for a registered entity type
+     * in the millisecond of {@code instant}. See
+     * {@link IdoraId#lowerBound(String, Instant, IdGenerationStrategy)}.
+     *
+     * <pre>{@code
+     * // every order created during August 2025, from a column holding nothing but order ids
+     * String from = ids.lowerBound(Order.class, Instant.parse("2025-08-01T00:00:00Z")).toString();
+     * String to = ids.upperBound(Order.class, Instant.parse("2025-08-31T23:59:59.999Z")).toString();
+     * }</pre>
+     *
+     * @param entityType the registered entity type
+     * @param instant the instant; its sub-millisecond part is ignored
+     * @return the lowest identifier for that millisecond
+     * @throws NullPointerException if either argument is {@code null}
+     * @throws EntityPrefixNotRegisteredException if {@code entityType} has no registered prefix
+     * @throws IllegalArgumentException if {@code instant} is before the Unix epoch or after the last
+     *     millisecond a 48-bit timestamp can hold
+     */
+    default IdoraId lowerBound(Class<?> entityType, Instant instant) {
+        return IdoraId.lowerBound(registry().getPrefix(entityType), instant, strategy());
+    }
+
+    /**
+     * Returns the highest identifier this generator's strategy can mint for a registered entity type
+     * in the millisecond of {@code instant}. See
+     * {@link IdoraId#upperBound(String, Instant, IdGenerationStrategy)}.
+     *
+     * @param entityType the registered entity type
+     * @param instant the instant; its sub-millisecond part is ignored, so the bound covers the whole
+     *     millisecond
+     * @return the highest identifier for that millisecond
+     * @throws NullPointerException if either argument is {@code null}
+     * @throws EntityPrefixNotRegisteredException if {@code entityType} has no registered prefix
+     * @throws IllegalArgumentException if {@code instant} is before the Unix epoch or after the last
+     *     millisecond a 48-bit timestamp can hold
+     */
+    default IdoraId upperBound(Class<?> entityType, Instant instant) {
+        return IdoraId.upperBound(registry().getPrefix(entityType), instant, strategy());
+    }
+
+    /**
+     * Checks a prefix against the rules registration and {@link #generate(String)} apply, for code
+     * that accepts prefixes from configuration or annotations of its own and wants to reject a bad
+     * one up front.
+     *
+     * <pre>{@code
+     * String prefix = IdoraGenerator.validatePrefix(config.getProperty("tenant.prefix"));
+     * }</pre>
+     *
+     * @param prefix the prefix to check, without the separator
+     * @return {@code prefix}, unchanged
+     * @throws NullPointerException if {@code prefix} is {@code null}
+     * @throws InvalidEntityPrefixException if {@code prefix} is empty, longer than 16 characters, or
+     *     contains anything other than an ASCII letter or digit
+     */
+    static String validatePrefix(String prefix) {
+        EntityPrefixValidator.validate(prefix, "prefix");
+        return prefix;
+    }
 
     /**
      * Starts configuring a generator. The defaults are ULID values and no registered entity types.

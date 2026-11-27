@@ -7,7 +7,7 @@
   <parent>
     <groupId>io.github.srkleraimbot</groupId>
     <artifactId>idora-parent</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
   </parent>
 
   <artifactId>idora</artifactId>
@@ -59,38 +59,12 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-source-plugin</artifactId>
-        <executions>
-          <execution>
-            <id>attach-sources</id>
-            <goals>
-              <goal>jar-no-fork</goal>
-            </goals>
-          </execution>
-        </executions>
       </plugin>
 
-      <!-- Built on every `verify`, not only for releases, so a documentation error fails CI. -->
+      <!-- Configured in the parent: built on every `verify`, so a documentation error fails CI. -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-javadoc-plugin</artifactId>
-        <configuration>
-          <failOnWarnings>true</failOnWarnings>
-          <failOnError>true</failOnError>
-          <doclint>all</doclint>
-          <quiet>true</quiet>
-          <release>${maven.compiler.release}</release>
-          <links>
-            <link>https://docs.oracle.com/en/java/javase/17/docs/api/</link>
-          </links>
-        </configuration>
-        <executions>
-          <execution>
-            <id>attach-javadocs</id>
-            <goals>
-              <goal>jar</goal>
-            </goals>
-          </execution>
-        </executions>
       </plugin>
     </plugins>
   </build>
@@ -100,27 +74,10 @@
       <id>release</id>
       <build>
         <plugins>
-          <!--
-            Publish a self-contained POM: the parent is a build convenience and is not published, so
-            the deployed POM must not point at it.
-          -->
+          <!-- Publish a self-contained POM; configured in the parent. -->
           <plugin>
             <groupId>org.codehaus.mojo</groupId>
             <artifactId>flatten-maven-plugin</artifactId>
-            <configuration>
-              <flattenMode>ossrh</flattenMode>
-              <outputDirectory>${project.build.directory}</outputDirectory>
-              <updatePomFile>true</updatePomFile>
-            </configuration>
-            <executions>
-              <execution>
-                <id>flatten</id>
-                <phase>process-resources</phase>
-                <goals>
-                  <goal>flatten</goal>
-                </goals>
-              </execution>
-            </executions>
           </plugin>
         </plugins>
       </build>

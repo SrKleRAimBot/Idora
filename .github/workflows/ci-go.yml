@@ -10,6 +10,9 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The core module, github.com/SrKleRAimBot/Idora/Idora.Go, including its stdlib-only
+  # subpackages such as idorahttp. `./...` stops at the nested modules below, which have their
+  # own go.mod and their own job.
   build:
     runs-on: ubuntu-latest
 
@@ -37,6 +40,7 @@ jobs:
           cache-dependency-path: Idora.Go/go.mod
 
       - name: Check formatting
+        # gofmt walks into the nested extension modules too, which is intended.
         run: test -z "$(gofmt -l .)" || { gofmt -l .; echo "::error::files above are not gofmt-formatted"; exit 1; }
 
       - name: Vet
@@ -56,3 +60,46 @@ jobs:
         # A single short pass so the benchmarks keep compiling and running; numbers from shared CI
         # runners are not meaningful.
         run: go test -run '^$' -bench . -benchtime 100x ./...
+
+  # The extension modules with third-party dependencies. Each requires the core at its released
+  # version, and replaces it with ../ so that it is built and tested against the core at this
+  # commit; consumers ignore the replace directive (see Idora.Go/README.md, "Releasing").
+  extensions:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [idoragorm, idorapgx]
+        go: ['1.23', 'stable']
+
+    env:
+      TZ: Australia/Sydney
+
+    defaults:
+      run:
+        working-directory: Idora.Go/${{ matrix.module }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache-dependency-path: Idora.Go/${{ matrix.module }}/go.sum
+
+      - name: Check go.mod and go.sum are tidy
+        run: go mod tidy -diff
+
+      - name: Check the core is replaced by this checkout
+        run: |
+          if ! grep -Eq '^replace github.com/SrKleRAimBot/Idora/Idora.Go => \.\./?$' go.mod; then
+            echo "::error::go.mod must replace the core module with ../ so CI tests this commit"; exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...

@@ -1,4 +1,4 @@
-//! Identifier generation benchmarks, on a small hand-rolled harness (no `criterion`: Idora has no
+//! Identifier generation and parsing benchmarks, on a small hand-rolled harness (no `criterion`: Idora has no
 //! dependencies, dev-dependencies included).
 //!
 //! Each case is warmed up, then timed over several samples of a calibrated number of iterations;
@@ -19,7 +19,7 @@
 use std::hint::black_box;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use idora::{Entity, Idora};
+use idora::{Entity, Id, Idora};
 
 struct Customer;
 impl Entity for Customer {
@@ -164,6 +164,38 @@ fn main() {
     println!("| --- | ---: | ---: |");
     for (name, ns) in &cases {
         println!("| {name} | {ns:.1} ns | {:.2} |", ns / baseline);
+    }
+
+    let reading: Vec<(&str, f64)> = vec![
+        (
+            "`generate_id::<T>()` — ULID, no allocation",
+            measure(|| ulid.generate_id::<Customer>().unwrap()),
+        ),
+        (
+            "`Id::parse` — ULID",
+            measure(|| Id::parse(black_box("cus_01k226e0g0008j4ct4ank7f24s")).unwrap()),
+        ),
+        (
+            "`Id::parse` — UUIDv7",
+            measure(|| Id::parse(black_box("cus_0198846702007011a233445566778899")).unwrap()),
+        ),
+        (
+            "`Id::is_valid` on a malformed identifier",
+            measure(|| Id::is_valid(black_box("cus_01K226E0G0008J4CT4ANK7F24S"))),
+        ),
+        (
+            "`ids.parse::<T>()` — registered prefix",
+            measure(|| {
+                ulid.parse::<Customer>(black_box("cus_01k226e0g0008j4ct4ank7f24s"))
+                    .unwrap()
+            }),
+        ),
+    ];
+    println!();
+    println!("| Reading and `Id` | Median |");
+    println!("| --- | ---: |");
+    for (name, ns) in &reading {
+        println!("| {name} | {ns:.1} ns |");
     }
 
     let cores = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);

@@ -3,6 +3,9 @@ name: Release Idora.JS
 # Publishing is driven entirely by tags: `git tag Idora.JS/v1.0.0 && git push origin Idora.JS/v1.0.0`.
 # The version comes from the tag rather than package.json, so the published package and the tag
 # can never disagree.
+#
+# One tag releases idora.js and every extension package in extensions/ (idora.js-zod,
+# idora.js-drizzle, idora.js-prisma) at the same version, each requiring that idora.js as a peer.
 on:
   push:
     tags: ['Idora.JS/v*']
@@ -16,6 +19,16 @@ on:
         required: false
         default: '0.0.0-dryrun'
         type: string
+
+# One release at a time: what a publish does (which dist-tag, what to skip) depends on what is
+# already on npm, so two runs must not decide it at once.
+concurrency:
+  # Dry runs get a group of their own, so they never hold up or displace a release; and every
+  # tagged release waits its turn (queue: max) rather than replacing one already pending, which
+  # is what a concurrency group does by default.
+  group: release-js-${{ github.event_name }}
+  cancel-in-progress: false
+  queue: max
 
 jobs:
   publish:
@@ -49,14 +62,21 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          # Passed as data, never interpolated into the script: a hand-typed dry-run version is
+          # validated below, and must not be able to run as shell before it is.
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
+            VERSION="$INPUT_VERSION"
           else
             VERSION="${GITHUB_REF_NAME#Idora.JS/v}"
           fi
 
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+          # Matched against the whole value, not line by line as grep would: a value with a newline in it
+          # must not pass on the strength of its first line.
+          SEMVER='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+          if ! [[ "$VERSION" =~ $SEMVER ]]; then
             echo "::error::'$VERSION' is not a valid semantic version (expected e.g. 1.0.0 or 1.0.0-rc.1)"
             exit 1
           fi
@@ -67,30 +87,65 @@ jobs:
         run: npm ci
 
       - name: Stamp the version from the tag
-        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
+        # On idora.js and every extension, whose idora.js peer range becomes ^<version>: an
+        # extension is tested only against the idora.js released alongside it, so that is the
+        # oldest it claims to work with. (For a prerelease, ^1.2.0-rc.1 also lets npm match it.)
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version --workspaces --include-workspace-root
+          VERSION="$VERSION" node -e '
+            const fs = require("node:fs");
+            for (const dir of fs.readdirSync("extensions")) {
+              const path = `extensions/${dir}/package.json`;
+              const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
+              pkg.peerDependencies["idora.js"] = `^${process.env.VERSION}`;
+              fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n");
+            }
+          '
 
       - name: Test
-        # The package is never published unless the whole suite passes on the exact source that is
-        # about to be packed.
-        run: npm test
+        # No package is published unless every suite passes on the exact source that is about to
+        # be packed. The extensions are built and tested against this idora.js, not a published one,
+        # so it is built first.
+        run: |
+          npm test
+          npm run build
+          npm run build --workspaces
+          npm test --workspaces
 
       - name: Pack
-        run: npm pack
+        run: |
+          npm pack
+          npm pack --workspaces
 
       - name: Verify package contents
-        # Cheap insurance against shipping a package missing its README, licence, entry point or
+        # Cheap insurance against shipping a package missing its README, licence, entry points or
         # type declarations — and against a runtime dependency creeping in.
         run: |
-          PKG="idora.js-${{ steps.version.outputs.version }}.tgz"
-          test -f "$PKG" || { echo "::error::$PKG was not produced"; exit 1; }
+          VERSION="${{ steps.version.outputs.version }}"
 
-          CONTENTS=$(tar -tzf "$PKG")
-          echo "$CONTENTS"
-          for required in package/package.json package/README.md package/LICENSE package/dist/index.js package/dist/index.d.ts; do
-            echo "$CONTENTS" | grep -qx "$required" || { echo "::error::package is missing $required"; exit 1; }
-          done
+          verify() {
+            PKG="$1-$VERSION.tgz"
+            shift
+            test -f "$PKG" || { echo "::error::$PKG was not produced"; exit 1; }
+
+            CONTENTS=$(tar -tzf "$PKG")
+            echo "$CONTENTS"
+            for required in package/package.json package/README.md package/LICENSE "$@"; do
+              echo "$CONTENTS" | grep -qx "$required" || { echo "::error::$PKG is missing $required"; exit 1; }
+            done
+          }
+
+          verify idora.js package/dist/index.js package/dist/index.d.ts
+          verify idora.js-zod package/dist/index.js package/dist/index.d.ts
+          verify idora.js-prisma package/dist/index.js package/dist/index.d.ts
+          verify idora.js-drizzle package/dist/index.js package/dist/index.d.ts \
+            package/dist/pg.js package/dist/pg.d.ts \
+            package/dist/mysql.js package/dist/mysql.d.ts \
+            package/dist/sqlite.js package/dist/sqlite.d.ts
 
           node -e '
+            const fs = require("node:fs");
             const pkg = require("./package.json");
             for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
               if (pkg[field] && Object.keys(pkg[field]).length > 0) {
@@ -98,24 +153,117 @@ jobs:
                 process.exit(1);
               }
             }
+
+            for (const dir of fs.readdirSync("extensions")) {
+              const extension = require(`./extensions/${dir}/package.json`);
+              for (const field of ["dependencies", "optionalDependencies"]) {
+                if (extension[field] && Object.keys(extension[field]).length > 0) {
+                  console.error(`::error::${extension.name} declares ${field}`);
+                  process.exit(1);
+                }
+              }
+
+              if (extension.version !== pkg.version || extension.peerDependencies["idora.js"] !== `^${pkg.version}`) {
+                console.error(`::error::${extension.name} is not stamped with version ${pkg.version}`);
+                process.exit(1);
+              }
+            }
           '
 
-      - name: Upload package as a build artifact
+      - name: Upload packages as a build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: npm-package-${{ steps.version.outputs.version }}
+          name: npm-packages-${{ steps.version.outputs.version }}
           path: Idora.JS/*.tgz
 
-      - name: Publish to npm
-        # The irreversible step. Reachable only from an Idora.JS/v* tag push. A prerelease version
-        # is published under the "next" dist-tag so that it never becomes "latest".
+      - name: Check every package already exists on npm
+        # Trusted publishing is configured per package, on the package's own settings page, so a
+        # package that has never been published cannot be published from here. Checked before
+        # anything is published, so a release never puts idora.js on npm and then stops at an
+        # extension; see "Releasing a new package" in Idora.JS/README.md for the one-off setup.
+        if: github.event_name == 'push'
+        run: |
+          MISSING=""
+          for NAME in idora.js idora.js-zod idora.js-drizzle idora.js-prisma; do
+            if OUTPUT=$(npm view "$NAME" name 2>&1); then
+              continue
+            fi
+            if echo "$OUTPUT" | grep -q E404; then
+              MISSING="$MISSING $NAME"
+            else
+              echo "::error::could not ask npm about $NAME:"; echo "$OUTPUT"; exit 1
+            fi
+          done
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::never published to npm:$MISSING. Publish each once by hand and add this workflow as its trusted publisher (Idora.JS/README.md, \"Releasing a new package\"), then re-run. Nothing was published."
+            exit 1
+          fi
+
+      - name: Decide what to publish, and under which dist-tag
+        # Before anything is published, so a registry error stops the release with nothing on npm
+        # rather than half-way through, and never quietly turns into "latest" or a duplicate publish.
+        #
+        # A version already on npm is recorded as "skip", so a release that stopped part-way can be
+        # finished by re-running the workflow. Only npm's E404 counts as "not published yet"; any
+        # other failure to ask is fatal.
+        #
+        # A prerelease goes to "next", so it never becomes "latest". A stable version goes to
+        # "latest" unless that package's "latest" is already newer — a fix released on an older
+        # line — in which case it goes to "maintenance-<major>.<minor>", so a fresh `npm install`
+        # never moves backwards.
+        id: dist_tags
         if: github.event_name == 'push'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          case "$VERSION" in
-            *-*) npm publish "idora.js-$VERSION.tgz" --provenance --access public --tag next ;;
-            *)   npm publish "idora.js-$VERSION.tgz" --provenance --access public ;;
-          esac
+          for NAME in idora.js idora.js-zod idora.js-drizzle idora.js-prisma; do
+            if PUBLISHED=$(npm view "$NAME@$VERSION" version 2>npm-view.err) && [ "$PUBLISHED" = "$VERSION" ]; then
+              echo "$NAME@$VERSION is already published; it will be skipped."
+              # Output names cannot hold dots, so idora.js is recorded as idora_js.
+              echo "${NAME//./_}=skip" >> "$GITHUB_OUTPUT"
+              continue
+            elif ! grep -q E404 npm-view.err; then
+              echo "::error::could not ask npm whether $NAME@$VERSION is published; nothing was published:"; cat npm-view.err; exit 1
+            fi
+
+            # Every package exists (checked above), so any failure here is the registry's, and fatal.
+            if ! LATEST=$(npm view "$NAME" dist-tags.latest 2>npm-view.err); then
+              echo "::error::could not read $NAME's dist-tags from npm; nothing was published:"; cat npm-view.err; exit 1
+            fi
+            DIST_TAG=$(node -e '
+              const [version, latest] = process.argv.slice(1);
+              const core = (v) => v.split("-")[0].split(".").map(Number);
+              const newer = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i]; return false; };
+              if (version.includes("-")) console.log("next");
+              else if (latest && newer(core(latest), core(version))) console.log(`maintenance-${core(version).slice(0, 2).join(".")}`);
+              else console.log("latest");
+            ' "$VERSION" "$LATEST")
+            echo "$NAME@$VERSION will be published under \"$DIST_TAG\" (latest is ${LATEST:-unset})."
+            echo "${NAME//./_}=$DIST_TAG" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Publish to npm
+        # The irreversible step. Reachable only from an Idora.JS/v* tag push, with what to publish
+        # and every dist-tag already decided above; this step asks npm nothing.
+        #
+        # idora.js goes first, so an extension is never on npm before the idora.js it requires.
+        if: github.event_name == 'push'
+        env:
+          TAGS: ${{ toJSON(steps.dist_tags.outputs) }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          for NAME in idora.js idora.js-zod idora.js-drizzle idora.js-prisma; do
+            DIST_TAG=$(echo "$TAGS" | jq -r --arg name "${NAME//./_}" '.[$name] // empty')
+            if [ -z "$DIST_TAG" ]; then
+              echo "::error::nothing was decided for $NAME"; exit 1
+            fi
+            if [ "$DIST_TAG" = skip ]; then
+              echo "$NAME@$VERSION is already published; skipping."
+              continue
+            fi
+            npm publish "$NAME-$VERSION.tgz" --provenance --access public --tag "$DIST_TAG"
+          done
 
       - name: Create GitHub release
         if: github.event_name == 'push'

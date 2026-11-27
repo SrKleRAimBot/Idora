@@ -14,6 +14,11 @@ package io.github.srkleraimbot.idora;
  *
  * <p>The hierarchy is sealed, so a {@code switch} over these three is exhaustive. A {@code null}
  * argument is reported separately, as a {@link NullPointerException} naming the parameter.
+ *
+ * <p>A text that is not an identifier is reported as an {@link InvalidIdException}, which is an
+ * {@link IllegalArgumentException} rather than one of these: it is bad input, like a malformed
+ * {@link java.util.UUID}, not a misuse of the library, and adding it here would have broken the
+ * exhaustive {@code switch} above.
  */
 public abstract sealed class IdoraException extends RuntimeException
         permits InvalidEntityPrefixException, DuplicateEntityPrefixException, EntityPrefixNotRegisteredException {

@@ -126,3 +126,19 @@ func BenchmarkParallelUUIDv7AdHoc(b *testing.B) {
 		_ = s
 	})
 }
+
+var sinkID idora.ID
+
+func BenchmarkParseULID(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		sinkID, _ = idora.Parse("usr_01k226e0g0008j4ct4ank7f24s")
+	}
+}
+
+func BenchmarkParseUUIDv7(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		sinkID, _ = idora.Parse("usr_0198846702007011a233445566778899")
+	}
+}

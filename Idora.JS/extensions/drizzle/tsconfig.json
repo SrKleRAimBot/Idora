@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    // Drizzle's declarations refer to platform types such as Buffer, which the core's ES-only lib omits.
+    "types": ["node"],
+    // Drizzle's declarations import optional drivers that are not installed (gel, mysql2) and do not
+    // all pass a full check, so declaration files are trusted rather than checked. Drizzle's own
+    // documentation recommends the same. This package's source is still checked in full.
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}

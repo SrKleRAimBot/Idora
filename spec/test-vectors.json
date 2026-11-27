@@ -1,5 +1,5 @@
 {
-  "$comment": "Shared conformance vectors. Every Idora package must reproduce these exactly. Random fields are big-endian hex; for ULID the 10 bytes are the 80-bit random field (bits 79..0), for UUIDv7 they are octets 6..15 before the version and variant bits are applied.",
+  "$comment": "Shared conformance vectors. Every Idora package must reproduce these exactly. Random fields are big-endian hex; for ULID the 10 bytes are the 80-bit random field (bits 79..0), for UUIDv7 they are octets 6..15 before the version and variant bits are applied. The ids section (specification section 6) lists identifiers that must parse with the parts given, identifiers that must be rejected with the reason given, identifiers in their natural order, and range bounds.",
   "ulid": [
     {
       "timestampMs": 0,
@@ -215,6 +215,289 @@
         "ord",
         "odr"
       ]
+    ]
+  },
+  "ids": {
+    "valid": [
+      {
+        "id": "usr_01k226e0g0008j4ct4ank7f24s",
+        "prefix": "usr",
+        "value": "01k226e0g0008j4ct4ank7f24s",
+        "format": "ulid",
+        "timestampMs": 1754568000000
+      },
+      {
+        "id": "ord_00000000000000000000000000",
+        "prefix": "ord",
+        "value": "00000000000000000000000000",
+        "format": "ulid",
+        "timestampMs": 0
+      },
+      {
+        "id": "x_7zzzzzzzzzzzzzzzzzzzzzzzzz",
+        "prefix": "x",
+        "value": "7zzzzzzzzzzzzzzzzzzzzzzzzz",
+        "format": "ulid",
+        "timestampMs": 281474976710655
+      },
+      {
+        "id": "USR_01hf7yat0004hmasw9nf6yy093",
+        "prefix": "USR",
+        "value": "01hf7yat0004hmasw9nf6yy093",
+        "format": "ulid",
+        "timestampMs": 1700000000000
+      },
+      {
+        "id": "abcdefghijklmnop_01aryz6s41g00000000000000f",
+        "prefix": "abcdefghijklmnop",
+        "value": "01aryz6s41g00000000000000f",
+        "format": "ulid",
+        "timestampMs": 1469918176385
+      },
+      {
+        "id": "A1b2C3d4E5f6G7h8_01k226e0g1zzqdvk5vnacrgxv6",
+        "prefix": "A1b2C3d4E5f6G7h8",
+        "value": "01k226e0g1zzqdvk5vnacrgxv6",
+        "format": "ulid",
+        "timestampMs": 1754568000001
+      },
+      {
+        "id": "inv_00000000000170008000000000000001",
+        "prefix": "inv",
+        "value": "00000000000170008000000000000001",
+        "format": "uuidv7",
+        "timestampMs": 1
+      },
+      {
+        "id": "inv_0198846702007011a233445566778899",
+        "prefix": "inv",
+        "value": "0198846702007011a233445566778899",
+        "format": "uuidv7",
+        "timestampMs": 1754568000000
+      },
+      {
+        "id": "evt_ffffffffffff7fffbfffffffffffffff",
+        "prefix": "evt",
+        "value": "ffffffffffff7fffbfffffffffffffff",
+        "format": "uuidv7",
+        "timestampMs": 281474976710655
+      },
+      {
+        "id": "Evt9_018bcfe568007123856789abcdef0123",
+        "prefix": "Evt9",
+        "value": "018bcfe568007123856789abcdef0123",
+        "format": "uuidv7",
+        "timestampMs": 1700000000000
+      },
+      {
+        "id": "doc_0198846702017fee9dccbbaa99887766",
+        "prefix": "doc",
+        "value": "0198846702017fee9dccbbaa99887766",
+        "format": "uuidv7",
+        "timestampMs": 1754568000001
+      },
+      {
+        "id": "doc_01563df364817000b0000000000000ff",
+        "prefix": "doc",
+        "value": "01563df364817000b0000000000000ff",
+        "format": "uuidv7",
+        "timestampMs": 1469918176385
+      }
+    ],
+    "invalid": [
+      {
+        "id": "",
+        "reason": "noSeparator"
+      },
+      {
+        "id": "usr01k226e0g0008j4ct4ank7f24s",
+        "reason": "noSeparator"
+      },
+      {
+        "id": "01k226e0g0008j4ct4ank7f24s",
+        "reason": "noSeparator"
+      },
+      {
+        "id": "_01k226e0g0008j4ct4ank7f24s",
+        "reason": "prefix"
+      },
+      {
+        "id": "abcdefghijklmnopq_01k226e0g0008j4ct4ank7f24s",
+        "reason": "prefix"
+      },
+      {
+        "id": "us-r_01k226e0g0008j4ct4ank7f24s",
+        "reason": "prefix"
+      },
+      {
+        "id": "us r_01k226e0g0008j4ct4ank7f24s",
+        "reason": "prefix"
+      },
+      {
+        "id": "caf\u00e9_01k226e0g0008j4ct4ank7f24s",
+        "reason": "prefix"
+      },
+      {
+        "id": "usr_",
+        "reason": "value"
+      },
+      {
+        "id": "usr__01k226e0g0008j4ct4ank7f24s",
+        "reason": "value"
+      },
+      {
+        "id": "usr_01k226e0g0008j4ct4ank7f24s_x",
+        "reason": "value"
+      },
+      {
+        "id": "usr_01k226e0g0008j4ct4ank7f24",
+        "reason": "value"
+      },
+      {
+        "id": "usr_01k226e0g0008j4ct4ank7f24ss",
+        "reason": "value"
+      },
+      {
+        "id": "usr_01K226E0G0008J4CT4ANK7F24S",
+        "reason": "value"
+      },
+      {
+        "id": "usr_81k226e0g0008j4ct4ank7f24s",
+        "reason": "value"
+      },
+      {
+        "id": "usr_01k226e0g0008j4ct4ank7f24i",
+        "reason": "value"
+      },
+      {
+        "id": "usr_01k226e0g0008j4ct4ank7f24u",
+        "reason": "value"
+      },
+      {
+        "id": "usr_01k226e0g0008j4ct4ank7f24s ",
+        "reason": "value"
+      },
+      {
+        "id": " usr_01k226e0g0008j4ct4ank7f24s",
+        "reason": "prefix"
+      },
+      {
+        "id": "inv_00000000000140008000000000000001",
+        "reason": "value"
+      },
+      {
+        "id": "inv_00000000000170000000000000000001",
+        "reason": "value"
+      },
+      {
+        "id": "inv_0000000000017000c000000000000001",
+        "reason": "value"
+      },
+      {
+        "id": "inv_0198846702007011A233445566778899",
+        "reason": "value"
+      },
+      {
+        "id": "inv_01988467-0200-7011-a233-445566778899",
+        "reason": "value"
+      },
+      {
+        "id": "inv_0000000000017000800000000000000g",
+        "reason": "value"
+      },
+      {
+        "id": "inv_0000000000017000800000000000001",
+        "reason": "value"
+      },
+      {
+        "id": "usr_01k226e0g0008j4ct4ank7f24s",
+        "reason": "prefixMismatch",
+        "expectedPrefix": "ord"
+      },
+      {
+        "id": "USR_01k226e0g0008j4ct4ank7f24s",
+        "reason": "prefixMismatch",
+        "expectedPrefix": "usr"
+      },
+      {
+        "id": "usr_01k226e0g0008j4ct4ank7f24s",
+        "reason": "prefixMismatch",
+        "expectedPrefix": "usr1"
+      },
+      {
+        "id": "usr_bad",
+        "reason": "value",
+        "expectedPrefix": "ord"
+      },
+      {
+        "id": "nope",
+        "reason": "noSeparator",
+        "expectedPrefix": "usr"
+      }
+    ],
+    "ordered": [
+      "zzz_00000000000000000000000000",
+      "aaa_00000000000070008000000000000000",
+      "aaa_00000000000170008000000000000001",
+      "aaa_00000000010000000000000001",
+      "bbb_00000000010000000000000001",
+      "usr_01hf7yat0004hmasw9nf6yy093",
+      "ord_0198846702007011a233445566778899",
+      "usr_01k226e0g0008j4ct4ank7f24s",
+      "ord_01k226e0g0fzzzzzzzzzzzzzzz",
+      "Ord_01k226e0g1zzqdvk5vnacrgxv6",
+      "ord_01k226e0g1zzqdvk5vnacrgxv6",
+      "evt_ffffffffffff7fffbfffffffffffffff"
+    ],
+    "bounds": [
+      {
+        "timestampMs": 0,
+        "format": "ulid",
+        "lower": "00000000000000000000000000",
+        "upper": "0000000000zzzzzzzzzzzzzzzz"
+      },
+      {
+        "timestampMs": 0,
+        "format": "uuidv7",
+        "lower": "00000000000070008000000000000000",
+        "upper": "0000000000007fffbfffffffffffffff"
+      },
+      {
+        "timestampMs": 1,
+        "format": "ulid",
+        "lower": "00000000010000000000000000",
+        "upper": "0000000001zzzzzzzzzzzzzzzz"
+      },
+      {
+        "timestampMs": 1,
+        "format": "uuidv7",
+        "lower": "00000000000170008000000000000000",
+        "upper": "0000000000017fffbfffffffffffffff"
+      },
+      {
+        "timestampMs": 1754568000000,
+        "format": "ulid",
+        "lower": "01k226e0g00000000000000000",
+        "upper": "01k226e0g0zzzzzzzzzzzzzzzz"
+      },
+      {
+        "timestampMs": 1754568000000,
+        "format": "uuidv7",
+        "lower": "01988467020070008000000000000000",
+        "upper": "0198846702007fffbfffffffffffffff"
+      },
+      {
+        "timestampMs": 281474976710655,
+        "format": "ulid",
+        "lower": "7zzzzzzzzz0000000000000000",
+        "upper": "7zzzzzzzzzzzzzzzzzzzzzzzzz"
+      },
+      {
+        "timestampMs": 281474976710655,
+        "format": "uuidv7",
+        "lower": "ffffffffffff70008000000000000000",
+        "upper": "ffffffffffff7fffbfffffffffffffff"
+      }
     ]
   }
 }

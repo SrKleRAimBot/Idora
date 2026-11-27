@@ -36,12 +36,13 @@ jobs:
             8.0.x
             9.0.x
             10.0.x
+            11.0.x
 
       - name: Restore
         run: dotnet restore
 
       - name: Build
-        # Builds net8.0, net9.0 and net10.0. Warnings are errors, so this also enforces that every
+        # Builds net8.0, net9.0, net10.0 and net11.0. Warnings are errors, so this also enforces that every
         # public member carries XML documentation.
         run: dotnet build -c Release --no-restore
 
@@ -49,9 +50,11 @@ jobs:
         run: dotnet test -c Release --no-build --verbosity normal
 
       - name: Pack
-        run: dotnet pack src/Idora/Idora.csproj -c Release --no-build -o artifacts
+        # Packs the solution, which produces a package for every project that sets IsPackable:
+        # Idora.NET and each of its companion packages. Tests and benchmarks opt out.
+        run: dotnet pack -c Release --no-build -o artifacts
 
-      - name: Upload package
+      - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
           name: nupkg

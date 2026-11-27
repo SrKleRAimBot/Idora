@@ -1,0 +1,76 @@
+{
+  "name": "idora.js-drizzle",
+  "version": "1.1.0",
+  "description": "Drizzle ORM columns for Idora identifiers such as usr_01k2f9v8ta7m3x0qbrn4dzeh5c: primary keys that fill themselves in, correctly sized columns for PostgreSQL, MySQL and SQLite, and created-between filters that use the index.",
+  "keywords": [
+    "idora",
+    "drizzle",
+    "drizzle-orm",
+    "id",
+    "identifier",
+    "ulid",
+    "uuidv7",
+    "prefixed-id",
+    "primary-key",
+    "postgres",
+    "mysql",
+    "sqlite"
+  ],
+  "homepage": "https://github.com/SrKleRAimBot/Idora/tree/main/Idora.JS/extensions/drizzle#readme",
+  "bugs": "https://github.com/SrKleRAimBot/Idora/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SrKleRAimBot/Idora.git",
+    "directory": "Idora.JS/extensions/drizzle"
+  },
+  "license": "MIT",
+  "author": "Jake Seracino",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./pg": {
+      "types": "./dist/pg.d.ts",
+      "default": "./dist/pg.js"
+    },
+    "./mysql": {
+      "types": "./dist/mysql.d.ts",
+      "default": "./dist/mysql.js"
+    },
+    "./sqlite": {
+      "types": "./dist/sqlite.d.ts",
+      "default": "./dist/sqlite.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "!dist/**/*.tsbuildinfo"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:test": "tsc -p tsconfig.test.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "npm run build:test && node --test build/test/*.test.js",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "drizzle-orm": ">=0.44.0 <1.0.0",
+    "idora.js": "^1.1.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.6.0",
+    "@types/node": "22.20.5",
+    "drizzle-orm": "0.45.4",
+    "idora.js": "file:../..",
+    "typescript": "7.0.2"
+  }
+}

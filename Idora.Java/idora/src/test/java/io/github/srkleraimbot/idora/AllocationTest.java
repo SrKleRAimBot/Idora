@@ -63,18 +63,29 @@ class AllocationTest {
         // Arrange: 100,000 UUIDs consume about a megabyte of entropy, so the stripe's 1 KiB block is
         // refilled around a thousand times inside the measurement.
         IdoraGenerator generator = IdoraGenerator.builder().useUuidV7().registerEntity(User.class, "usr").build();
-        double floor = floorFor(generator.generate(User.class).length());
+        // The floor is measured with the same window and warm-up as the generator below, so both are
+        // compared at the same stage of compilation; with a shorter one the floor itself drifts on
+        // some JDKs (27 measures a bare string at anywhere from 52 to 72 bytes).
+        double floor = floorFor(generator.generate(User.class).length(), 100_000, 1_000_000);
 
-        // Act
-        double actual = AllocationMeter.bytesPerCall(() -> generator.generate(User.class), 100_000);
+        // Act: a million unmeasured calls first, about ten thousand refills, so the JDK's DRBG is
+        // compiled by C2 before measuring. With the default warm-up only a couple of hundred refills
+        // have run, the DRBG may still be in C1 and allocate ~1 KiB of temporaries per refill, and
+        // whether it has been compiled in time depends on the JDK build (it is not, on 25.0.5).
+        double actual = AllocationMeter.bytesPerCall(() -> generator.generate(User.class), 100_000, 1_000_000);
 
         // Assert: refilling must not allocate meaningfully, or the cost would scale with volume.
         assertOnlyTheString(actual, floor);
     }
 
     private static double floorFor(int length) {
+        return floorFor(length, ITERATIONS, 20_000);
+    }
+
+    private static double floorFor(int length, int iterations, int warmUp) {
         byte[] source = new byte[length];
-        return AllocationMeter.bytesPerCall(() -> new String(source, 0, length, StandardCharsets.ISO_8859_1), ITERATIONS);
+        return AllocationMeter.bytesPerCall(
+                () -> new String(source, 0, length, StandardCharsets.ISO_8859_1), iterations, warmUp);
     }
 
     private static void assertOnlyTheString(double actual, double floor) {

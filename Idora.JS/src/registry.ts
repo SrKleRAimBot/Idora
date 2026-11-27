@@ -1,5 +1,6 @@
 import { declaredPrefixOf, nameOf } from './entity-prefix.js';
 import { DuplicateEntityPrefixError, EntityPrefixNotRegisteredError, InvalidEntityPrefixError } from './errors.js';
+import { type Id, IdoraId } from './idora-id.js';
 import { foldPrefix, SEPARATOR, validatePrefix } from './internal/prefix.js';
 import type { EntityModule, EntityRegistration, EntityType } from './types.js';
 
@@ -7,12 +8,15 @@ import type { EntityModule, EntityRegistration, EntityType } from './types.js';
  * The immutable set of entity-type to prefix mappings built when an {@link Idora} generator is
  * constructed.
  *
- * Reach for it when you need the prefix itself rather than a whole identifier — checking that an
- * incoming identifier belongs to the entity a route expects, say:
+ * Reach for it when you need the prefix itself rather than a whole identifier, or to check that an
+ * incoming identifier belongs to the entity a route expects:
  *
  * ```ts
- * const isOrderId = (id: string) => id.startsWith(`${ids.registry.getPrefix(Order)}_`);
+ * ids.registry.getPrefix(Order);              // 'ord'
+ * ids.registry.isIdFor(Order, request.params.id); // a well-formed identifier with the prefix 'ord'?
  * ```
+ *
+ * The parsing methods are also on {@link Idora} itself, which is usually the object to hand.
  */
 export class EntityPrefixRegistry {
   readonly #prefixes: ReadonlyMap<EntityType, string>;
@@ -61,6 +65,45 @@ export class EntityPrefixRegistry {
   }
 
   /**
+   * Parses `text` as an identifier for `entityType`: a well-formed identifier whose prefix is
+   * exactly the one `entityType` was registered with.
+   *
+   * ```ts
+   * ids.registry.parse(User, 'usr_01k226e0g0008j4ct4ank7f24s'); // an IdoraId
+   * ids.registry.parse(User, 'ord_01k226e0g0008j4ct4ank7f24s'); // throws InvalidIdError, 'prefixMismatch'
+   * ```
+   *
+   * @throws {EntityPrefixNotRegisteredError} `entityType` has no registered prefix. Checked before
+   * the text, because the mistake is in the calling code rather than in the identifier.
+   * @throws {InvalidIdError} `text` is not a well-formed identifier, or has another prefix.
+   * @throws {TypeError} `text` is not a string.
+   */
+  parse(entityType: EntityType, text: string): IdoraId {
+    return IdoraId.read(text, this.#prefixForParsing(entityType), entityType, true)!;
+  }
+
+  /**
+   * Parses `text` as an identifier for `entityType`, returning `undefined` instead of throwing if it
+   * is malformed, has another prefix, or is not a string at all.
+   *
+   * @throws {EntityPrefixNotRegisteredError} `entityType` has no registered prefix. That is a
+   * mistake in the calling code rather than in the text, so it throws even here.
+   */
+  tryParse(entityType: EntityType, text: unknown): IdoraId | undefined {
+    return IdoraId.read(text, this.#prefixForParsing(entityType), entityType, false);
+  }
+
+  /**
+   * Whether `text` is a well-formed identifier with exactly the prefix `entityType` was registered
+   * with. In TypeScript this is a type guard, narrowing `text` to {@link Id}.
+   *
+   * @throws {EntityPrefixNotRegisteredError} `entityType` has no registered prefix.
+   */
+  isIdFor(entityType: EntityType, text: unknown): text is Id {
+    return IdoraId.read(text, this.#prefixForParsing(entityType), entityType, false) !== undefined;
+  }
+
+  /**
    * @internal The prefix with the separator already appended, ready to be the start of an
    * identifier. Stored separately so generation is one concatenation rather than two.
    */
@@ -68,6 +111,15 @@ export class EntityPrefixRegistry {
     const prefix = this.#prefixesWithSeparator.get(entityType);
     if (prefix === undefined) {
       throw notRegistered(entityType);
+    }
+
+    return prefix;
+  }
+
+  #prefixForParsing(entityType: EntityType): string {
+    const prefix = this.#prefixes.get(entityType);
+    if (prefix === undefined) {
+      throw notRegistered(entityType, 'or parse it with IdoraId.parse and an explicit expected prefix');
     }
 
     return prefix;
@@ -264,10 +316,13 @@ function duplicateEntityType(entityType: EntityType, existingPrefix: string, att
   return new DuplicateEntityPrefixError(message, attemptedPrefix, entityType, entityType);
 }
 
-function notRegistered(entityType: EntityType): EntityPrefixNotRegisteredError {
+function notRegistered(
+  entityType: EntityType,
+  alternative = 'or call generateWithPrefix with an explicit prefix',
+): EntityPrefixNotRegisteredError {
   const name = typeof entityType === 'function' ? nameOf(entityType) : String(entityType);
   return new EntityPrefixNotRegisteredError(
-    `No entity prefix is registered for '${name}'. Register one when creating the generator, for example new Idora({ entities: [[${name}, 'abc']] }), decorate the class with @entityPrefix('abc'), or call generateWithPrefix with an explicit prefix.`,
+    `No entity prefix is registered for '${name}'. Register one when creating the generator, for example new Idora({ entities: [[${name}, 'abc']] }), decorate the class with @entityPrefix('abc'), ${alternative}.`,
     entityType,
   );
 }

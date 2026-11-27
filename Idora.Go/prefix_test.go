@@ -79,3 +79,16 @@ func TestFoldPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestValidatePrefix(t *testing.T) {
+	if err := ValidatePrefix("usr"); err != nil {
+		t.Errorf("ValidatePrefix(usr) = %v", err)
+	}
+	var invalid *InvalidPrefixError
+	if err := ValidatePrefix("us_r"); !errors.As(err, &invalid) || invalid.Reason != ReasonSeparator {
+		t.Errorf("ValidatePrefix(us_r) = %v", err)
+	}
+	if n := testing.AllocsPerRun(1000, func() { _ = ValidatePrefix("usr") }); n != 0 {
+		t.Errorf("ValidatePrefix allocated %v times", n)
+	}
+}

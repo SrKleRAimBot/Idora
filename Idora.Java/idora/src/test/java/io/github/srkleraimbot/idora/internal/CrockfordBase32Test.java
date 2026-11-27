@@ -153,4 +153,23 @@ class CrockfordBase32Test {
         assertThrows(ArrayIndexOutOfBoundsException.class, () -> CrockfordBase32.encodeUlid(0, 0, 0, destination, -1));
         assertEquals(0, destination[4]);
     }
+
+    @Test
+    void decode_isTheInverseOfTheAlphabet() {
+        // Act & Assert
+        for (int i = 0; i < CrockfordBase32.ALPHABET.length(); i++) {
+            assertEquals(i, CrockfordBase32.decode(CrockfordBase32.ALPHABET.charAt(i)));
+        }
+    }
+
+    @Test
+    void decode_isStrict_rejectingUppercaseOmittedLettersAndEverythingElse() {
+        // Act & Assert: nothing a conforming generator does not emit.
+        for (char c : "ABCDEFGHJKMNPQRSTVWXYZilou_-. \u00e9\u0661\uffff".toCharArray()) {
+            assertEquals(-1, CrockfordBase32.decode(c), "'" + c + "'");
+        }
+        assertEquals(-1, CrockfordBase32.decode((char) 0));
+        assertEquals(-1, CrockfordBase32.decode((char) 127));
+        assertEquals(-1, CrockfordBase32.decode((char) 128));
+    }
 }

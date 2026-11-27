@@ -1,6 +1,6 @@
 [package]
 name = "idora"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Idora.Rust: prefixed, time-ordered entity identifiers (usr_01k2f9v8ta7m3x0qbrn4dzeh5c) built on ULID or UUIDv7, with zero dependencies."
@@ -13,10 +13,28 @@ keywords = ["id", "ulid", "uuid", "identifier", "prefix"]
 categories = ["encoding", "data-structures", "database"]
 include = ["src/**/*.rs", "Cargo.toml", "README.md", "LICENSE"]
 
-# Deliberately empty. Idora has no dependencies of any kind, including dev-dependencies: the
-# entropy source is a direct call into the operating system, and the test and benchmark harnesses
-# are hand-written on top of std.
+# Idora has no dependencies of any kind by default, including dev-dependencies: the entropy source
+# is a direct call into the operating system, and the test and benchmark harnesses are hand-written
+# on top of std. The two below are optional, off by default, and exist only because the orphan rule
+# puts a foreign trait's implementations for `Id` in this crate or nowhere. Their own tests live in
+# the unpublished crates/idora-tests, so that the default test build stays dependency-free too.
 [dependencies]
+serde = { version = "1.0.100", optional = true, default-features = false }
+sqlx = { version = "0.9", optional = true, default-features = false }
+
+[features]
+# Serialize and deserialize Id and TypedId as strings; deserializing validates.
+serde = ["dep:serde"]
+# Bind Id and TypedId as query parameters and decode them from text columns, for every sqlx 0.9
+# database. Requires Rust 1.94, which sqlx 0.9 does.
+sqlx = ["dep:sqlx"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[workspace]
+members = ["crates/idora-axum", "crates/idora-tests"]
 
 [[bench]]
 name = "generation"
@@ -24,6 +42,7 @@ harness = false
 
 [lints.rust]
 missing_docs = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(docsrs)"] }
 unsafe_op_in_unsafe_fn = "deny"
 unsafe_code = "deny"
 

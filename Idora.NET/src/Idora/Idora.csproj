@@ -1,28 +1,39 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
-    <AnalysisMode>Recommended</AnalysisMode>
-
-    <!-- Public API: XML docs are part of the deliverable, and a missing one is a build error. -->
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TargetFrameworks>net8.0;net9.0;net10.0;net11.0</TargetFrameworks>
 
     <!-- Enables trimming/AOT friendliness checks for consumers who publish trimmed. -->
     <IsTrimmable>true</IsTrimmable>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
+  <!-- Version, authors, licence, icon and Source Link come from src/Directory.Build.props. -->
   <PropertyGroup Label="Package metadata">
     <IsPackable>true</IsPackable>
     <PackageId>Idora.NET</PackageId>
-    <Version>1.0.0</Version>
-    <Authors>Jake Seracino</Authors>
-    <Description>Idora generates prefixed, time-ordered entity identifiers such as usr_01k2f9v8ta7m3x0qbrn4dzeh5c. Each ID carries a per-entity prefix so you can tell what it identifies at a glance, followed by a lowercase ULID (default) or UUIDv7 so IDs sort by creation time and index well. Prefixes are registered once at startup, either fluently at DI setup or with an [EntityPrefix] attribute on the entity, eliminating magic strings and catching collisions at startup. Formerly published as UserFriendlyIds.</Description>
-    <PackageTags>idora;id;identifier;ulid;uuid;uuidv7;guid;prefix;prefixed-id;sortable;time-ordered;dependency-injection;attribute</PackageTags>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageIcon>icon.png</PackageIcon>
+    <Description>Idora generates prefixed, time-ordered entity identifiers such as usr_01k2f9v8ta7m3x0qbrn4dzeh5c. Each ID carries a per-entity prefix so you can tell what it identifies at a glance, followed by a lowercase ULID (default) or UUIDv7 so IDs sort by creation time and index well. Prefixes are registered once at startup, either fluently at DI setup or with an [EntityPrefix] attribute on the entity, eliminating magic strings and catching collisions at startup. IdoraId parses, validates and orders identifiers from any Idora package, and round-trips through JSON and model binding. Formerly published as UserFriendlyIds.</Description>
+    <PackageTags>idora;id;identifier;ulid;uuid;uuidv7;guid;prefix;prefixed-id;sortable;time-ordered;dependency-injection;attribute;parse;validation</PackageTags>
     <PackageReleaseNotes>
+      1.1.0 - Reading and comparing identifiers.
+
+      * IdoraId: a parsed identifier. Parse, TryParse and IsValid, strict, with an optional expected
+        prefix; Prefix, Value, Format and Timestamp; equality, and a chronological natural order with
+        operators; IsBefore/IsAfter, CompareTimestamp, IsSameMillisecond, IsCreatedBefore/After and
+        HasPrefix. IParsable, ISpanParsable, ISpanFormattable and IUtf8SpanFormattable, and an
+        implicit conversion to string.
+      * IdoraId.LowerBound and UpperBound: the range of identifiers minted for one prefix during a
+        span of time, for querying a key column by creation time with two string comparisons.
+      * InvalidIdException and InvalidIdReason, raised when parsing fails.
+      * IsIdFor, ParseIdFor and TryParseIdFor on IEntityPrefixRegistry: parse against the prefix
+        registered for an entity type. GenerateId on IIdoraGenerator returns an IdoraId.
+      * IdoraId serialises to JSON as a plain string, and has a TypeConverter, so it binds from routes,
+        query strings and configuration with no setup.
+      * New companion packages: Idora.NET.EntityFrameworkCore and Idora.NET.AspNetCore.
+      * Targets net11.0 as well as net8.0, net9.0 and net10.0.
+
+      Purely additive; nothing existing changes behaviour.
+
       1.0.0 - UserFriendlyIds is now Idora.NET.
 
       This is the UserFriendlyIds 1.1.0 feature set under a new name, as part of the Idora family of
@@ -39,21 +50,10 @@
       Everything else - EntityPrefixAttribute, IEntityPrefixRegistry, IdGenerationStrategy and the
       other exception types - keeps its name and behaviour.
     </PackageReleaseNotes>
-    <PackageProjectUrl>https://github.com/SrKleRAimBot/Idora</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/SrKleRAimBot/Idora</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
-    <Copyright>Copyright (c) 2026 Jake Seracino</Copyright>
-
-    <!-- Source Link (built into the SDK) plus a symbols package, so consumers can step into this code. -->
-    <PublishRepositoryUrl>true</PublishRepositoryUrl>
-    <EmbedUntrackedSources>true</EmbedUntrackedSources>
-    <IncludeSymbols>true</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="../../README.md" Pack="true" PackagePath="\" />
-    <None Include="icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>

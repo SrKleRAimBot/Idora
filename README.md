@@ -104,13 +104,50 @@ millisecond.
 Identifiers are unpredictable but not secret: the timestamp is readable by anyone. Treat them as
 public, and never use one as a bearer token.
 
+### Reading identifiers back
+
+Identifiers come back — in a route, a message, a foreign key — so every package can parse one into
+a value holding its prefix, its value, its format and the moment it was minted, whichever package
+minted it. Parsing is strict: it accepts exactly what a generator emits, and says which part is
+wrong when it refuses. Parsed identifiers compare by **time first**, so a mixed list of users,
+orders and invoices sorts into the order they were created, and each package also answers "same
+millisecond?", "created before this instant?" and "does this belong to a `User`?".
+
+Because the value starts with its timestamp, the identifiers one prefix received during a span of
+time are a contiguous range of strings. Every package can compute that range's bounds, so "orders
+created this week" becomes `id BETWEEN lower AND upper` on the primary-key index, without a
+`created_at` column.
+
 ### One specification, five implementations
 
 Every package implements the same [specification](spec/SPECIFICATION.md) and passes the same
 [conformance vectors](spec/test-vectors.json) — exact ULID and UUIDv7 encodings, monotonic-step
-behaviour, and the prefixes that must be accepted, rejected and treated as colliding. An identifier
+behaviour, the prefixes that must be accepted, rejected and treated as colliding, and the
+identifiers that must parse, be refused, sort and bound a time range exactly as listed. An identifier
 minted by Idora.Go can be sorted, split and validated by Idora.JS without either knowing where it
 came from.
+
+## Integrations
+
+The core packages stay dependency-free. Everything that ties Idora to a framework, an ORM or a
+serializer lives in a companion package, written for that ecosystem rather than translated between
+them, and released alongside its core package at the same version:
+
+| Ecosystem | Package | What it gives you |
+| --- | --- | --- |
+| .NET | [`Idora.NET.EntityFrameworkCore`](Idora.NET/src/Idora.EntityFrameworkCore) | `HasIdoraKey(x => x.Id)` and a value generator in the fluent configuration, `IdoraId` column mapping, `WhereCreatedBetween` range queries |
+| .NET | [`Idora.NET.AspNetCore`](Idora.NET/src/Idora.AspNetCore) | the `{id:idora(usr)}` route constraint and `[IdoraId]` / `[IdoraIdFor<User>]` validation attributes |
+| JavaScript | [`idora.js-zod`](Idora.JS/extensions/zod) | Zod schemas that validate an identifier's prefix and format, and a codec to `IdoraId` |
+| JavaScript | [`idora.js-drizzle`](Idora.JS/extensions/drizzle) | self-filling primary-key columns for PostgreSQL, MySQL and SQLite, and `createdBetween` filters |
+| JavaScript | [`idora.js-prisma`](Idora.JS/extensions/prisma) | a Prisma Client extension that fills missing ids on `create`, `createMany` and `upsert` |
+| Java | [`idora-hibernate`](Idora.Java/idora-hibernate) | `@IdoraGeneratedId` for JPA entities and native `IdoraId` attribute mapping |
+| Java | [`idora-jackson`](Idora.Java/idora-jackson) | a Jackson module, with `@IdoraIdPrefix("usr")` validation on deserialisation |
+| Java | [`idora-spring-boot`](Idora.Java/idora-spring-boot) | auto-configuration from `idora.*` properties, `@PathVariable IdoraId` binding, and wiring for the two above |
+| Go | [`idorahttp`](Idora.Go/idorahttp) | `net/http` path-value parsing and middleware that rejects malformed ids |
+| Go | [`idoragorm`](Idora.Go/idoragorm) | a GORM plugin that fills primary keys on create, and `CreatedBetween` scopes |
+| Go | [`idorapgx`](Idora.Go/idorapgx) | stores a UUIDv7 identifier in a native PostgreSQL `uuid` column and restores its prefix on scan |
+| Rust | [`idora-axum`](Idora.Rust/crates/idora-axum) | `PathId` and `IdFor<User>` extractors that answer 400 or 404 for the wrong identifier |
+| Rust | `idora` features `serde`, `sqlx` | validating (de)serialisation and database encoding for `Id`, off by default |
 
 ## Repository layout
 

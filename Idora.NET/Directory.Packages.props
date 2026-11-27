@@ -6,7 +6,7 @@
     <!--
       Transitive pinning is deliberately left off. The library declares the lowest dependency
       version it supports (8.0.x), while the test and benchmark projects pull newer packages that
-      depend on 10.x. Pinning would force the two together and fail the restore; leaving it off lets
+      depend on 10.x and 11.x. Pinning would force the two together and fail the restore; leaving it off lets
       NuGet unify upwards exactly as it does in a consuming application.
     -->
   </PropertyGroup>
@@ -19,10 +19,47 @@
       consumers alone.
     -->
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+
+    <!--
+      Idora.NET.EntityFrameworkCore. The same rule: EF Core 8 is the lowest release that runs on
+      net8.0, net9.0 and net10.0, so a .NET 8 application on EF Core 8 is left alone and one on EF
+      Core 9 or 10 unifies upwards. The newest 8.0 patch rather than 8.0.0, whose transitive
+      dependencies carry published vulnerabilities that NuGet audit (and so the build) would reject.
+    -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="8.0.34" Condition="'$(TargetFramework)' != 'net11.0'" />
+
+    <!--
+      The net11.0 build is compiled against EF Core 11 instead. EF Core 11 removed the
+      ConverterMappingHints constructor that every earlier release has, so code built against EF
+      Core 8 fails at run time on 11 with a MissingMethodException, and no constructor exists in both.
+      EF Core 11 runs only on .NET 11, so each build still meets every EF Core release its framework
+      can run, except EF Core 10 on .NET 11, which is lifted to 11.
+    -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="11.0.0" Condition="'$(TargetFramework)' == 'net11.0'" />
+  </ItemGroup>
+
+  <!--
+    The test projects run on both .NET 10 and .NET 11, each against the framework packages of its
+    own release: EF Core 10 on net10.0 and EF Core 11 on net11.0, so both upward unifications from
+    the EF Core 8 the package is built against are proven. EF Core 11 runs only on .NET 11.
+  -->
+  <ItemGroup Label="Test dependencies for .NET 10" Condition="'$(TargetFramework)' != 'net11.0'">
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup Label="Test dependencies for .NET 11" Condition="'$(TargetFramework)' == 'net11.0'">
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="11.0.0" />
   </ItemGroup>
 
   <ItemGroup Label="Test dependencies">
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />

@@ -5,6 +5,7 @@
  */
 
 export { Idora } from './idora.js';
+export { compareIds, type Id, IdoraId } from './idora-id.js';
 export { entityPrefix } from './entity-prefix.js';
 export { EntityPrefixRegistry } from './registry.js';
 export {
@@ -12,6 +13,8 @@ export {
   EntityPrefixNotRegisteredError,
   IdoraError,
   InvalidEntityPrefixError,
+  InvalidIdError,
+  type InvalidIdReason,
   type InvalidPrefixReason,
 } from './errors.js';
 export type { EntityModule, EntityRegistration, EntityType, IdoraOptions, IdStrategy } from './types.js';

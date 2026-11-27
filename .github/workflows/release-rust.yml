@@ -1,7 +1,9 @@
 name: Release Idora.Rust
 
-# Publishing is driven entirely by tags: `git tag Idora.Rust/v1.0.0 && git push origin Idora.Rust/v1.0.0`.
-# The tag must match the version in Cargo.toml, which crates.io reads from the package itself.
+# Publishing is driven entirely by tags: `git tag Idora.Rust/v1.1.0 && git push origin Idora.Rust/v1.1.0`.
+# One tag releases every published crate in the workspace, in dependency order: `idora` first,
+# then the crates in crates/ that depend on it. All of them carry the same version, and the tag
+# must match it; crates.io reads the version from each package itself.
 on:
   push:
     tags: ['Idora.Rust/v*']
@@ -12,6 +14,17 @@ on:
 env:
   CARGO_TERM_COLOR: always
   TZ: Australia/Sydney
+  # In publish order. idora-tests is never published (publish = false).
+  CRATES: idora idora-axum
+
+# One release at a time: what a publish skips depends on what is already on crates.io.
+concurrency:
+  # Dry runs get a group of their own, so they never hold up or displace a release; and every
+  # tagged release waits its turn (queue: max) rather than replacing one already pending, which
+  # is what a concurrency group does by default.
+  group: release-rust-${{ github.event_name }}
+  cancel-in-progress: false
+  queue: max
 
 jobs:
   publish:
@@ -33,30 +46,80 @@ jobs:
       - name: Set up Rust
         run: rustup update stable && rustup default stable
 
-      - name: Check the tag matches Cargo.toml
+      - name: Check the tag matches every crate's Cargo.toml
         id: tag
         if: github.event_name == 'push'
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#Idora.Rust/v}"
           echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
-          CRATE_VERSION=$(cargo metadata --format-version 1 --no-deps | sed -n 's/.*"name":"idora","version":"\([^"]*\)".*/\1/p')
-          echo "Tag: $TAG_VERSION, Cargo.toml: $CRATE_VERSION"
-          if [ "$TAG_VERSION" != "$CRATE_VERSION" ]; then
-            echo "::error::tag version $TAG_VERSION does not match Cargo.toml version $CRATE_VERSION"
-            exit 1
-          fi
+          METADATA=$(cargo metadata --format-version 1 --no-deps)
+          for crate in $CRATES; do
+            CRATE_VERSION=$(echo "$METADATA" | jq -r --arg name "$crate" '.packages[] | select(.name == $name) | .version')
+            echo "Tag: $TAG_VERSION, $crate: $CRATE_VERSION"
+            if [ "$TAG_VERSION" != "$CRATE_VERSION" ]; then
+              echo "::error::tag version $TAG_VERSION does not match $crate's Cargo.toml version $CRATE_VERSION"
+              exit 1
+            fi
+          done
 
       - name: Test
-        run: cargo test
+        run: |
+          cargo test -p idora
+          cargo test --workspace --all-features
 
       - name: Package
-        run: cargo package
+        # idora-axum is verified against the idora package built here, before idora is published.
+        run: cargo package --workspace --exclude idora-tests
 
-      - name: Upload crate as a build artifact
+      - name: Upload crates as a build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: crate
+          name: crates
           path: Idora.Rust/target/package/*.crate
+
+      - name: Check every crate already exists on crates.io, and which versions are out
+        # Trusted publishing is configured per crate, and crates.io accepts it only for a crate that
+        # already exists, so a crate's first version has to be published by hand. Checked before
+        # anything is published, so a release never puts idora on crates.io and then stops at a
+        # crate that cannot be published from here; see "Releasing a new crate" in
+        # Idora.Rust/README.md for the one-off setup.
+        #
+        # It also records, for each crate, whether this version is already published, so the
+        # publish step asks crates.io nothing: only a 200 or a 404 is an answer, and anything else
+        # stops the release here, before any crate is published.
+        id: state
+        if: github.event_name == 'push'
+        run: |
+          VERSION="${{ steps.tag.outputs.version }}"
+          MISSING=""
+          for crate in $CRATES; do
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H 'User-Agent: Idora release workflow (github.com/SrKleRAimBot/Idora)' \
+              "https://crates.io/api/v1/crates/$crate")
+            case "$STATUS" in
+              200) ;;
+              404) MISSING="$MISSING $crate" ;;
+              *) echo "::error::crates.io answered HTTP $STATUS for $crate; try again later"; exit 1 ;;
+            esac
+          done
+
+          if [ -z "$MISSING" ]; then
+            for crate in $CRATES; do
+              STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+                -H 'User-Agent: Idora release workflow (github.com/SrKleRAimBot/Idora)' \
+                "https://crates.io/api/v1/crates/$crate/$VERSION")
+              case "$STATUS" in
+                200) echo "${crate//-/_}=skip" >> "$GITHUB_OUTPUT" ;;
+                404) echo "${crate//-/_}=publish" >> "$GITHUB_OUTPUT" ;;
+                *) echo "::error::crates.io answered HTTP $STATUS for $crate $VERSION; try again later"; exit 1 ;;
+              esac
+            done
+          fi
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::never published to crates.io:$MISSING. Publish each once by hand and add this workflow as its trusted publisher (Idora.Rust/README.md, \"Releasing a new crate\"), then re-run. Nothing was published."
+            exit 1
+          fi
 
       - name: Authenticate with crates.io (OIDC, short-lived token)
         if: github.event_name == 'push'
@@ -64,11 +127,23 @@ jobs:
         id: auth
 
       - name: Publish to crates.io
-        # The irreversible step. Reachable only from an Idora.Rust/v* tag push.
+        # The irreversible step. Reachable only from an Idora.Rust/v* tag push. Crates go up in
+        # dependency order, and `cargo publish` waits until each is in the index before the next
+        # resolves against it. A version already on crates.io (as recorded above) is skipped, so a
+        # run that failed half-way through can simply be re-run.
         if: github.event_name == 'push'
-        run: cargo publish
+        run: |
+          for crate in $CRATES; do
+            STATE=$(echo "$STATE_JSON" | jq -r --arg name "${crate//-/_}" '.[$name] // empty')
+            case "$STATE" in
+              skip) echo "$crate ${{ steps.tag.outputs.version }} is already on crates.io; skipping" ;;
+              publish) cargo publish -p "$crate" ;;
+              *) echo "::error::nothing was decided for $crate"; exit 1 ;;
+            esac
+          done
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          STATE_JSON: ${{ toJSON(steps.state.outputs) }}
 
       - name: Create GitHub release
         if: github.event_name == 'push'
